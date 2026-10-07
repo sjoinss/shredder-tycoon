@@ -1,0 +1,118 @@
+/*
+ * 테마별 색상 변수 세트. <html data-theme="..."> 하나로 전환한다.
+ * 컴포넌트는 색을 직접 쓰지 않고 이 토큰만 참조한다. 새 테마는 여기에 블록 하나를 추가하면 된다.
+ */
+
+/* 오피스 그린 (기본) — 캐비닛·데스크 매트 */
+:root,
+[data-theme="green"],
+[data-theme="system"] {
+  color-scheme: light;
+  --color-desk: #e8e4da;
+  --color-desk-grid: rgba(47, 93, 70, 0.09);
+  --color-surface: #fbf8f1;
+  --color-surface-2: #f1ece0;
+  --color-text: #1f2a33;
+  --color-muted: #525c66;
+  --color-border: #cfc7b6;
+  --color-ink-line: #2a3540;
+  --color-primary: #2f5d46;
+  --color-primary-strong: #234736;
+  --color-on-primary: #fbf8f1;
+  --color-secondary: #dcbc6e;
+  --color-on-secondary: #1f2a33;
+  --color-tab-idle: #e7d6a6;
+  --color-shadow: rgba(31, 42, 51, 0.2);
+  --color-focus: #1f5fd1;
+  --stage-body: #3b4f45;
+  --stage-body-dark: #26332d;
+  --stage-slot: #0e1411;
+  --stage-bin-back: #d7d1c3;
+  --stage-glass: rgba(255, 255, 255, 0.16);
+}
+
+/* 딥 네이비 — 정장·결재 서류 */
+[data-theme="navy"] {
+  color-scheme: light;
+  --color-desk: #e2e5ea;
+  --color-desk-grid: rgba(35, 57, 91, 0.08);
+  --color-surface: #fafaf7;
+  --color-surface-2: #edeff2;
+  --color-text: #1d2633;
+  --color-muted: #4f5a68;
+  --color-border: #c7cdd6;
+  --color-ink-line: #26303d;
+  --color-primary: #23395b;
+  --color-primary-strong: #1a2b45;
+  --color-on-primary: #fafaf7;
+  --color-secondary: #d9bf7a;
+  --color-on-secondary: #1d2633;
+  --color-tab-idle: #e6d9b3;
+  --color-shadow: rgba(29, 38, 51, 0.2);
+  --color-focus: #b8322a;
+  --stage-body: #2e3b52;
+  --stage-body-dark: #1e283a;
+  --stage-slot: #0b0f17;
+  --stage-bin-back: #d3d8df;
+  --stage-glass: rgba(255, 255, 255, 0.16);
+}
+
+/* 야간 사무실 (다크) — 퇴근 후 어두운 사무실 */
+[data-theme="night"] {
+  color-scheme: dark;
+  --color-desk: #1b1e21;
+  --color-desk-grid: rgba(255, 255, 255, 0.035);
+  --color-surface: #2a2e33;
+  --color-surface-2: #23272b;
+  --color-text: #e8e4da;
+  --color-muted: #aab0b6;
+  --color-border: #444b52;
+  --color-ink-line: #0c0e10;
+  --color-primary: #7cc4a2;
+  --color-primary-strong: #9ad5b9;
+  --color-on-primary: #10201a;
+  --color-secondary: #8b7442;
+  --color-on-secondary: #f6efdf;
+  --color-tab-idle: #3a382f;
+  --color-shadow: rgba(0, 0, 0, 0.45);
+  --color-focus: #f2c14e;
+  --stage-body: #4a5a52;
+  --stage-body-dark: #333f39;
+  --stage-slot: #080a09;
+  --stage-bin-back: #30353a;
+  --stage-glass: rgba(255, 255, 255, 0.06);
+}
+
+/* 시스템 설정 따르기: 다크 모드면 야간 사무실 */
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    color-scheme: dark;
+    --color-desk: #1b1e21;
+    --color-desk-grid: rgba(255, 255, 255, 0.035);
+    --color-surface: #2a2e33;
+    --color-surface-2: #23272b;
+    --color-text: #e8e4da;
+    --color-muted: #aab0b6;
+    --color-border: #444b52;
+    --color-ink-line: #0c0e10;
+    --color-primary: #7cc4a2;
+    --color-primary-strong: #9ad5b9;
+    --color-on-primary: #10201a;
+    --color-secondary: #8b7442;
+    --color-on-secondary: #f6efdf;
+    --color-tab-idle: #3a382f;
+    --color-shadow: rgba(0, 0, 0, 0.45);
+    --color-focus: #f2c14e;
+    --stage-body: #4a5a52;
+    --stage-body-dark: #333f39;
+    --stage-slot: #080a09;
+    --stage-bin-back: #30353a;
+    --stage-glass: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* 설정 화면 견본 (책상 + 주색) */
+.theme-swatch--green { background: linear-gradient(135deg, #e8e4da 50%, #2f5d46 50%); }
+.theme-swatch--navy { background: linear-gradient(135deg, #e2e5ea 50%, #23395b 50%); }
+.theme-swatch--night { background: linear-gradient(135deg, #1b1e21 50%, #7cc4a2 50%); }
+.theme-swatch--system { background: linear-gradient(135deg, #e8e4da 33%, #2f5d46 33% 50%, #1b1e21 50% 83%, #7cc4a2 83%); }

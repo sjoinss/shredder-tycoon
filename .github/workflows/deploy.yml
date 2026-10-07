@@ -1,0 +1,52 @@
+# main에 푸시하면 정적 사이트(out/)를 빌드해 GitHub Pages로 배포한다.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포가 겹치면 진행 중인 배포는 끝까지 두고 다음 것을 기다린다
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - name: Build static export
+        run: npx next build
+        env:
+          # 프로젝트 페이지 주소: https://<사용자>.github.io/<저장소>/
+          PAGES_BASE_PATH: /${{ github.event.repository.name }}
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
