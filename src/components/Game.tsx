@@ -543,6 +543,7 @@ export default function Game() {
           desk={desk}
           fixHint={fixHint}
           onOpenDesk={() => fixable && setDeskDocId(fixable.id)}
+          onFeed={feed}
           topExtra={
             desktop &&
             order && (

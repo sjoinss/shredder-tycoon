@@ -92,18 +92,20 @@ interface Props {
   desk?: React.ReactNode;
   /** 슬롯 위 서류에 고칠 게 있으면 그 이름들 (정리하기 버튼) */
   fixHint?: string | null;
-  /** 정리하기 버튼이나 슬롯 위 서류를 눌렀을 때 */
+  /** 정리하기 버튼이나 (고칠 게 있는) 슬롯 위 서류를 눌렀을 때 */
   onOpenDesk?: () => void;
+  /** 고칠 게 없는 슬롯 위 서류를 눌렀을 때: 바로 투입 */
+  onFeed?: () => void;
 }
 
-export default function ShredStage({ engine, settings, snap, children, topExtra, desk, fixHint, onOpenDesk }: Props) {
+export default function ShredStage({ engine, settings, snap, children, topExtra, desk, fixHint, onOpenDesk, onFeed }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   /** 파쇄기 윗면 y: 작업대는 그 위 공간만 쓴다 */
   const [headTop, setHeadTop] = useState(0);
-  // 캔버스 이벤트 핸들러가 최신 콜백을 부르도록 (고칠 게 없으면 null)
-  const openDeskRef = useRef<(() => void) | null>(null);
+  // 슬롯 위 서류를 누르면: 고칠 게 있으면 크게 펼치고, 없으면 바로 투입 (캔버스 핸들러가 최신 콜백을 부르도록)
+  const paperTapRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    openDeskRef.current = fixHint ? (onOpenDesk ?? null) : null;
+    paperTapRef.current = (fixHint ? onOpenDesk : onFeed) ?? null;
   });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<StageRenderer | null>(null);
@@ -137,12 +139,12 @@ export default function ShredStage({ engine, settings, snap, children, topExtra,
       if (renderer.pointerDown(x, y)) {
         capturePointer(canvas, e.pointerId);
         e.preventDefault();
-      } else if (renderer.hoverHit(x, y)) openDeskRef.current?.();
+      } else if (renderer.hoverHit(x, y)) paperTapRef.current?.();
     };
     const move = (e: PointerEvent) => {
       const [x, y] = pos(e);
       renderer.pointerMove(x, y);
-      canvas.style.cursor = renderer.hitTest(x, y) ? "grab" : renderer.hoverHit(x, y) && openDeskRef.current ? "pointer" : "";
+      canvas.style.cursor = renderer.hitTest(x, y) ? "grab" : renderer.hoverHit(x, y) && paperTapRef.current ? "pointer" : "";
     };
     const up = () => renderer.pointerUp();
     canvas.addEventListener("pointerdown", down);
@@ -219,7 +221,7 @@ export default function ShredStage({ engine, settings, snap, children, topExtra,
         <canvas
           ref={canvasRef}
           role="img"
-          aria-label="종이 파쇄기. 위의 슬롯으로 서류가 들어가 잘린 조각이 아래 투명 폐지통에 쌓입니다."
+          aria-label="종이 파쇄기. 슬롯 위에서 기다리는 서류를 누르면 투입되고, 잘린 조각이 아래 투명 폐지통에 쌓입니다."
           style={{ touchAction: interactive ? "none" : "auto" }}
         />
       </div>
