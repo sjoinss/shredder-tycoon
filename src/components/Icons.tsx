@@ -174,7 +174,37 @@ export const IconHand = (p: IconProps) => (
   </Svg>
 );
 
+/** 스테이플러 제거기: 맞물린 두 개의 집게 이빨 */
+export const IconStapleRemover = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 9.5l8-5 8 5" />
+    <path d="M4 14.5l8 5 8-5" />
+    <path d="M9 9.5l3 2.5 3-2.5M9 14.5l3-2.5 3 2.5" />
+  </Svg>
+);
+
+/** 커터칼: 사선 칼날 + 손잡이 */
+export const IconCutter = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3.5 20.5l5-5" />
+    <path d="M7 17l9.5-9.5 3 3L10 20H7z" />
+    <path d="M16.5 7.5l3-4 1 1-1 6" />
+  </Svg>
+);
+
+/** 레터 오프너 + 봉투 */
+export const IconLetterOpener = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 9h12v10H3z" />
+    <path d="M3 9l6 5 6-5" />
+    <path d="M14.5 13.5l6.5-9.5M17 10l2 1.5" />
+  </Svg>
+);
+
 export const UPGRADE_ICONS = {
+  stapleRemover: IconStapleRemover,
+  cutter: IconCutter,
+  letterOpener: IconLetterOpener,
   autoReverse: IconReverse,
   speed: IconBolt,
   cooldown: IconTimer,

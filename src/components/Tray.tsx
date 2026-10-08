@@ -15,7 +15,7 @@ const PAD = 6;
 /** 오프스크린에 한 번 그려둔 서류 이미지를 축소해서 보여줌 (+ 방해 요소) */
 const DocThumb = memo(function DocThumb({ doc }: { doc: DocView }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const hazKey = doc.hazards.map((h) => h.left).join(",");
+  const hazKey = doc.hazards.map((h) => h.left).join(",") + (doc.torn ? "t" : "");
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -134,6 +134,13 @@ export default function Tray({ tray, selectedId, batchIds, slots, arrivalLeft, o
                   style={{ "--tilt": `${tilt(doc.seed)}deg` } as React.CSSProperties}
                 >
                   <DocThumb doc={doc} />
+                  {(doc.sheets ?? 1) > 1 && (
+                    <span className="doc-card__sheets">
+                      <span aria-hidden="true">×{doc.sheets}</span>
+                      <span className="sr-only">{doc.sheets}장 뭉치</span>
+                    </span>
+                  )}
+                  {doc.torn && <span className="sr-only">찢어짐</span>}
                   {order > 0 && (
                     <span className="doc-card__batch">
                       <span aria-hidden="true">+{order}</span>

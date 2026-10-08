@@ -397,6 +397,23 @@ export class SoundBoard {
       case "sleeve":
         this.noiseBurst(t, 0.25, 6500, 0.08);
         break;
+      case "postit":
+        // 접착면이 떨어지는 짧은 찍
+        this.noiseBurst(t, 0.08, 3800, 0.1);
+        break;
+      case "tape":
+        // 테이프 뜯는 지익 소리 (높은 잡음이 길게)
+        this.noiseBurst(t, 0.18, 5200, 0.14);
+        this.noiseBurst(t + 0.05, 0.12, 2400, 0.06);
+        break;
+      case "envelope":
+        if (done) this.noiseBurst(t, 0.3, 6000, 0.07);
+        else this.noiseBurst(t, 0.16, 2800, 0.14);
+        break;
+      case "album":
+        this.noiseBurst(t, 0.22, 7000, 0.07);
+        if (done) this.tone(2400, t + 0.15, 0.12, "triangle", 0.05);
+        break;
     }
   }
 

@@ -167,6 +167,7 @@ export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, 
               {tab === "facility" && <BagRow snap={snap} onBuyBags={onBuyBags} />}
             </ul>
           )}
+          {activeTab.note && <p className="postit upgrades__note">{activeTab.note}</p>}
         </div>
       </div>
     </section>

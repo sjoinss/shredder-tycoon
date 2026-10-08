@@ -2,7 +2,18 @@
 
 export type TemplateId = "official" | "ledger" | "receipt" | "memo" | "image";
 export type RarityId = "gold" | "urgent";
-export type UpgradeId = "speed" | "cooldown" | "capacity" | "motor" | "fan" | "autoReverse" | "inbox" | "bin";
+export type UpgradeId =
+  | "speed"
+  | "cooldown"
+  | "capacity"
+  | "motor"
+  | "fan"
+  | "autoReverse"
+  | "inbox"
+  | "bin"
+  | "stapleRemover"
+  | "cutter"
+  | "letterOpener";
 export type UpgradeTab = "shredder" | "tools" | "automation" | "facility";
 export type CutGradeId = "P-1";
 
@@ -32,7 +43,16 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
 export const TEMPLATE_IDS = (Object.keys(TEMPLATES) as TemplateId[]).filter((id) => TEMPLATES[id].weight > 0);
 
 // ---------- 방해 요소 ----------
-export type HazardKind = "crumple" | "clip" | "staple" | "binder" | "sleeve";
+export type HazardKind =
+  | "crumple"
+  | "clip"
+  | "staple"
+  | "binder"
+  | "sleeve"
+  | "postit"
+  | "tape"
+  | "envelope"
+  | "album";
 
 export interface HazardDef {
   name: string;
@@ -95,7 +115,58 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     unlockAt: 90,
     tip: "투명 파일에 든 서류는 위로 밀어 꺼내세요. 비닐은 거의 확실히 걸려요.",
   },
+  postit: {
+    name: "포스트잇",
+    action: "떼기",
+    taps: 1,
+    jam: 0.2,
+    heavy: false,
+    unlockAt: 120,
+    tip: "포스트잇은 탭해서 떼세요. 접착면이 칼날에 들러붙어요.",
+  },
+  tape: {
+    name: "테이프",
+    action: "잘라 떼기",
+    taps: 3,
+    jam: 0.45,
+    heavy: false,
+    unlockAt: 150,
+    tip: "테이프는 줄을 따라 끌어서 잘라 떼요. 손으로 하면 서류가 찢어질 수 있어요 — 커터칼이 있으면 깔끔해요.",
+  },
+  envelope: {
+    name: "봉투",
+    action: "열고 꺼내기",
+    // 뜯기 3번 + 꺼내기 1번
+    taps: 4,
+    jam: 0.5,
+    heavy: false,
+    unlockAt: 200,
+    tip: "봉투는 윗변을 뜯어 열고 서류를 위로 꺼내요. 레터 오프너가 있으면 한 번에 열려요.",
+  },
+  album: {
+    name: "앨범 파일",
+    action: "꺼내기",
+    // 서류가 든 페이지 수 (최대)
+    taps: 4,
+    jam: 0.9,
+    heavy: true,
+    unlockAt: 260,
+    tip: "앨범 파일은 좌우로 넘기며 서류가 든 페이지만 꺼내세요. 빈 포켓은 건너뛰어요.",
+  },
 };
+
+/** 서류를 감싸는 방해 요소: 먼저 꺼내야 안쪽을 만질 수 있다 */
+export const CONTAINER_KINDS: readonly HazardKind[] = ["sleeve", "envelope", "album"];
+/** 봉투: 남은 탭이 이 값이면 열린 상태 (꺼내기만 남음) */
+export const ENVELOPE_OPENED = 1;
+/** 앨범 파일 페이지 구성 */
+export const ALBUM = { minPages: 4, maxPages: 6, minFilled: 2, maxFilled: 4 };
+/** 앨범 페이지 상태 */
+export const PAGE_EMPTY = 0;
+export const PAGE_DOC = 1;
+export const PAGE_TAKEN = 2;
+/** 찢어진 서류 수익 배율 */
+export const TORN_MULT = 0.6;
 
 export const HAZARD_KINDS = Object.keys(HAZARDS) as HazardKind[];
 /** 해금 후 서류에 방해 요소가 붙을 확률 */
@@ -187,6 +258,14 @@ export const HEAT = {
   /** 조기 재가동 후 열 발생 배율 (30% 아래로 식을 때까지) */
   earlyPenalty: 1.3,
 };
+
+// ---------- 도구 ----------
+const TAPE_CUTS = [3, 2, 1, 1];
+const TEAR_CHANCE = [0.3, 0.15, 0.05, 0];
+/** 커터칼 레벨별: 테이프 하나를 떼는 데 필요한 동작 수 */
+export const tapeCuts = (lv: number) => TAPE_CUTS[Math.min(lv, TAPE_CUTS.length - 1)];
+/** 커터칼 레벨별: 테이프를 다 뗄 때 서류가 찢어질 확률 */
+export const tearChance = (lv: number) => TEAR_CHANCE[Math.min(lv, TEAR_CHANCE.length - 1)];
 
 /** 쓰레기통 규칙 */
 export const BIN = {
@@ -285,14 +364,44 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 10,
     effect: (lv) => `${binCapacity(lv)}장 분량`,
   },
+  {
+    id: "stapleRemover",
+    tab: "tools",
+    name: "스테이플러 제거기",
+    desc: "스테이플을 한 번에 뽑음 (Lv.2: 서류의 스테이플 전부)",
+    baseCost: 250,
+    growth: 3,
+    maxLevel: 2,
+    effect: (lv) => (lv >= 2 ? "전부 한 번에" : lv === 1 ? "1번에 1개" : "손톱으로 2번"),
+  },
+  {
+    id: "cutter",
+    tab: "tools",
+    name: "커터칼",
+    desc: "테이프를 적게 끌어도 잘리고, 서류가 덜 찢어짐",
+    baseCost: 300,
+    growth: 2,
+    maxLevel: 3,
+    effect: (lv) => `${tapeCuts(lv)}번 · 찢어짐 ${Math.round(tearChance(lv) * 100)}%`,
+  },
+  {
+    id: "letterOpener",
+    tab: "tools",
+    name: "레터 오프너",
+    desc: "봉투 윗변을 한 번에 깔끔하게 엶",
+    baseCost: 450,
+    growth: 1,
+    maxLevel: 1,
+    effect: (lv) => (lv > 0 ? "한 번에 열기" : "손으로 3번 뜯기"),
+  },
 ];
 
 export const upgradeCost = (def: UpgradeDef, level: number) =>
   Math.ceil(def.baseCost * Math.pow(def.growth, level));
 
-export const TABS: { id: UpgradeTab; label: string; lockedNote?: string }[] = [
+export const TABS: { id: UpgradeTab; label: string; lockedNote?: string; note?: string }[] = [
   { id: "shredder", label: "파쇄기" },
-  { id: "tools", label: "도구", lockedNote: "스테이플러 제거기, 커터칼, 레터 오프너가 곧 입고됩니다. 그때까지는 손으로 처리해요." },
+  { id: "tools", label: "도구", note: "가위와 라벨 리무버는 코팅 서류와 카드가 들어오면 입고돼요." },
   { id: "automation", label: "자동화", lockedNote: "알바생과 자동 급지 장치는 사무실이 커지면 들어와요." },
   { id: "facility", label: "시설" },
 ];

@@ -1,19 +1,25 @@
-import { HAZARDS, TEMPLATES } from "../data";
+import { ENVELOPE_OPENED, HAZARDS, PAGE_DOC, TEMPLATES } from "../data";
 import { createRng } from "../rng";
 import type { DocData, Hazard } from "../save";
+
+/** 테이프 길이: 종이 폭의 70% (작업대 드래그 영역도 같은 값) */
+export const TAPE_LENGTH = 0.7;
+export const TAPE_WIDTH = 14;
+export const POSTIT_SIZE = 38;
 
 /**
  * 방해 요소 그림. 서류 이미지 위에 덧그린다 (제거하면 사라져야 하므로 서류 캔버스에 굽지 않음).
  * 좌표는 서류의 mm 좌표 × scale — 작업대의 탭 버튼도 같은 좌표를 쓴다.
  */
 export function drawHazards(ctx: CanvasRenderingContext2D, doc: DocData, x: number, y: number, scale: number) {
-  if (!doc.hazards.length) return;
+  if (!doc.hazards.length && !doc.torn) return;
   const t = TEMPLATES[doc.template];
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
-  // 구겨짐 → 클립/스테이플/집게 → 투명 파일(맨 위) 순서
-  const order = ["crumple", "staple", "clip", "binder", "sleeve"] as const;
+  if (doc.torn) drawTear(ctx, doc.seed, t.width, t.height);
+  // 구겨짐 → 클립/스테이플/집게 → 테이프/포스트잇 → 서류를 감싼 것(맨 위) 순서
+  const order = ["crumple", "staple", "clip", "binder", "tape", "postit", "sleeve", "envelope", "album"] as const;
   for (const kind of order) {
     for (const h of doc.hazards) {
       if (h.kind !== kind) continue;
@@ -37,9 +43,245 @@ export function drawHazards(ctx: CanvasRenderingContext2D, doc: DocData, x: numb
         case "sleeve":
           drawSleeve(ctx, t.width, t.height);
           break;
+        case "postit":
+          drawPostit(ctx, h, doc.seed);
+          break;
+        case "tape":
+          drawTape(ctx, h, t.width, doc.seed);
+          break;
+        case "envelope":
+          drawEnvelope(ctx, h, t.width, t.height, doc.seed);
+          break;
+        case "album":
+          drawAlbumCover(ctx, h, t.width, t.height);
+          break;
       }
     }
   }
+  ctx.restore();
+}
+
+/** 찢어진 자국: 윗변에서 비스듬히 내려오는 들쭉날쭉한 선 + 살짝 들린 조각 */
+function drawTear(ctx: CanvasRenderingContext2D, seed: number, w: number, h: number) {
+  const rng = createRng(seed ^ 0x7ea2);
+  const pts: [number, number][] = [];
+  let px = rng.range(w * 0.3, w * 0.7);
+  let py = 0;
+  pts.push([px, py]);
+  const len = h * rng.range(0.22, 0.34);
+  while (py < len) {
+    py += rng.range(4, 8);
+    px += rng.range(-5, 5);
+    pts.push([px, py]);
+  }
+  ctx.save();
+  // 들린 조각 그림자
+  ctx.fillStyle = "rgba(31,42,51,0.12)";
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], 0);
+  for (const [qx, qy] of pts) ctx.lineTo(qx + 2.5, qy);
+  ctx.lineTo(pts[0][0] + 14, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(60,50,40,0.75)";
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const [qx, qy] of pts.slice(1)) ctx.lineTo(qx, qy);
+  ctx.stroke();
+  // 찢긴 종이 섬유 (흰 테두리)
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] + 1, pts[0][1]);
+  for (const [qx, qy] of pts.slice(1)) ctx.lineTo(qx + 1, qy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+const POSTIT_COLORS = ["#f8e27a", "#f7b4c6", "#a9dcf2", "#b9e6a2"];
+
+function drawPostit(ctx: CanvasRenderingContext2D, h: Hazard, seed: number) {
+  const rng = createRng(seed ^ 0x9057);
+  const s = POSTIT_SIZE;
+  ctx.save();
+  ctx.translate(h.x + s / 2, h.y + s / 2);
+  ctx.rotate(rng.range(-0.08, 0.08));
+  ctx.fillStyle = "rgba(31,42,51,0.2)";
+  ctx.fillRect(-s / 2 + 1.5, -s / 2 + 2, s, s);
+  ctx.fillStyle = rng.pick(POSTIT_COLORS);
+  ctx.fillRect(-s / 2, -s / 2, s, s);
+  // 접착 띠 (위쪽 약간 진하게)
+  ctx.fillStyle = "rgba(0,0,0,0.05)";
+  ctx.fillRect(-s / 2, -s / 2, s, 7);
+  // 손글씨 낙서
+  ctx.strokeStyle = "rgba(43,76,155,0.75)";
+  ctx.lineWidth = 0.9;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 3; i++) {
+    const ly = -s / 2 + 13 + i * 7;
+    ctx.beginPath();
+    ctx.moveTo(-s / 2 + 5, ly);
+    let lx = -s / 2 + 5;
+    const end = s / 2 - rng.range(6, 16);
+    while (lx < end) {
+      lx += 3;
+      ctx.lineTo(lx, ly + rng.range(-1.2, 1.2));
+    }
+    ctx.stroke();
+  }
+  // 아래 모서리가 살짝 말려 올라감
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.beginPath();
+  ctx.moveTo(s / 2, s / 2 - 7);
+  ctx.lineTo(s / 2 - 7, s / 2);
+  ctx.lineTo(s / 2, s / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawTape(ctx: CanvasRenderingContext2D, h: Hazard, w: number, seed: number) {
+  // 남은 양만큼 오른쪽부터 남아 있다 (왼쪽부터 잘라 나감)
+  const len = w * TAPE_LENGTH;
+  const keep = h.left / HAZARDS.tape.taps;
+  const x0 = h.x + len * (1 - keep);
+  const x1 = h.x + len;
+  const half = TAPE_WIDTH / 2;
+  const rng = createRng(seed ^ 0x7a9e);
+  ctx.save();
+  ctx.fillStyle = "rgba(225,214,170,0.55)";
+  ctx.strokeStyle = "rgba(150,130,80,0.45)";
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  // 왼쪽 끝: 잘린 자리(직선) 또는 손으로 뜯은 지그재그
+  ctx.moveTo(x0, h.y - half);
+  ctx.lineTo(x1, h.y - half);
+  // 오른쪽 끝은 테이프 커터 자국 (톱니)
+  for (let i = 0; i <= 6; i++) ctx.lineTo(x1 + (i % 2 ? 1.6 : 0), h.y - half + (TAPE_WIDTH / 6) * i);
+  ctx.lineTo(x0, h.y + half);
+  if (keep < 1) {
+    for (let i = 6; i >= 0; i--) ctx.lineTo(x0 - (i % 2 ? 1.2 : 0), h.y - half + (TAPE_WIDTH / 6) * i);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // 광택 줄 + 갇힌 기포
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.fillRect(x0, h.y - half + 2, x1 - x0, 1.6);
+  for (let i = 0; i < 4; i++) {
+    const bx = rng.range(h.x, x1);
+    if (bx < x0) continue;
+    ctx.beginPath();
+    ctx.arc(bx, h.y + rng.range(-3, 3), rng.range(0.8, 1.6), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawEnvelope(ctx: CanvasRenderingContext2D, h: Hazard, w: number, ht: number, seed: number) {
+  const opened = h.left <= ENVELOPE_OPENED;
+  const rng = createRng(seed ^ 0xe7e1);
+  const kraft = rng.chance(0.5);
+  const hasWindow = rng.chance(0.5);
+  const paper = kraft ? "#d9bf8f" : "#f3f1ea";
+  const line = kraft ? "rgba(110,80,40,0.55)" : "rgba(90,100,110,0.5)";
+  const m = 3;
+  ctx.save();
+  // 열렸으면 서류 윗부분이 봉투 위로 삐져나와 보인다 (봉투가 아래로 30mm 내려감)
+  const top = opened ? 30 : -m;
+  ctx.fillStyle = "rgba(31,42,51,0.18)";
+  ctx.fillRect(-m + 2, top + 2, w + m * 2, ht + m - top);
+  // 창봉투는 창 자리를 비워 두고 칠한다 (비닐 창으로 서류 일부가 비쳐 보임)
+  const win = hasWindow && !opened ? ([w * 0.12, ht * 0.18, w * 0.5, ht * 0.14] as const) : null;
+  ctx.fillStyle = paper;
+  ctx.beginPath();
+  ctx.rect(-m, top, w + m * 2, ht + m - top);
+  if (win) ctx.rect(...win);
+  ctx.fill("evenodd");
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 0.8;
+  ctx.strokeRect(-m, top, w + m * 2, ht + m - top);
+  // 뒷면 접합선 (X자 아래쪽)
+  ctx.beginPath();
+  ctx.moveTo(-m, ht + m);
+  ctx.lineTo(w / 2, top + (ht - top) * 0.55);
+  ctx.lineTo(w + m, ht + m);
+  ctx.stroke();
+  if (win) {
+    ctx.fillStyle = "rgba(190,215,235,0.28)";
+    ctx.fillRect(...win);
+    ctx.strokeStyle = "rgba(90,120,150,0.5)";
+    ctx.strokeRect(...win);
+  }
+  if (!opened) {
+    // 덮개 (윗변 삼각형)
+    ctx.fillStyle = kraft ? "#cfb07a" : "#e8e5db";
+    ctx.beginPath();
+    ctx.moveTo(-m, -m);
+    ctx.lineTo(w + m, -m);
+    ctx.lineTo(w / 2, ht * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = line;
+    ctx.stroke();
+    // 뜯은 정도: 윗변을 따라 찢긴 자국이 늘어남
+    const torn = HAZARDS.envelope.taps - h.left;
+    if (torn > 0) {
+      const len = ((w + m * 2) * torn) / (HAZARDS.envelope.taps - ENVELOPE_OPENED);
+      ctx.strokeStyle = "rgba(60,50,40,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-m, -m + 4);
+      for (let px = -m; px < -m + len; px += 3) ctx.lineTo(px, -m + 4 + (px % 6 ? 1.4 : -1));
+      ctx.stroke();
+    }
+    // 우표 자리 / 주소 줄
+    ctx.strokeStyle = line;
+    ctx.strokeRect(w - 34, ht * 0.38, 24, 28);
+    ctx.fillStyle = line;
+    for (let i = 0; i < 3; i++) ctx.fillRect(w * 0.35, ht * 0.6 + i * 9, w * (0.4 - i * 0.06), 1.4);
+  } else {
+    // 뜯긴 윗변
+    ctx.strokeStyle = "rgba(60,50,40,0.6)";
+    ctx.beginPath();
+    ctx.moveTo(-m, top);
+    for (let px = -m; px <= w + m; px += 3) ctx.lineTo(px, top + (px % 6 ? 1.6 : -1));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawAlbumCover(ctx: CanvasRenderingContext2D, h: Hazard, w: number, ht: number) {
+  // 남색 PP 앨범 파일 표지 + 왼쪽 등 + 라벨
+  const m = 5;
+  const total = h.pages?.length ?? 0;
+  const left = h.pages?.filter((p) => p === PAGE_DOC).length ?? 0;
+  ctx.save();
+  ctx.fillStyle = "rgba(31,42,51,0.25)";
+  ctx.fillRect(-m + 3, -m + 3, w + m * 2, ht + m * 2);
+  ctx.fillStyle = "#2c3f63";
+  ctx.fillRect(-m, -m, w + m * 2, ht + m * 2);
+  // 페이지 두께 (오른쪽 가장자리)
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  for (let i = 0; i < Math.min(total, 6); i++) ctx.fillRect(w + m - 1 - i * 1.2, -m + 4, 0.6, ht + m * 2 - 8);
+  ctx.fillStyle = "#1f2e4b";
+  ctx.fillRect(-m, -m, 18, ht + m * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(-m + 18, -m, 2, ht + m * 2);
+  // 라벨
+  ctx.fillStyle = "#f3f1ea";
+  ctx.fillRect(w * 0.3, ht * 0.18, w * 0.52, 40);
+  ctx.strokeStyle = "rgba(31,42,51,0.5)";
+  ctx.lineWidth = 0.8;
+  ctx.strokeRect(w * 0.3, ht * 0.18, w * 0.52, 40);
+  ctx.fillStyle = "#26303a";
+  ctx.font = "700 13px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("보관 서류", w * 0.56, ht * 0.18 + 14);
+  ctx.font = "500 10px sans-serif";
+  ctx.fillText(`${left}장 남음`, w * 0.56, ht * 0.18 + 29);
   ctx.restore();
 }
 

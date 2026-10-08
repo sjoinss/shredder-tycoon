@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HAZARDS, RARITIES, TABS, UPGRADES, shredTime, type UpgradeId, type UpgradeTab } from "@/game/data";
+import { HAZARDS, RARITIES, TABS, TORN_MULT, UPGRADES, shredTime, type UpgradeId, type UpgradeTab } from "@/game/data";
 import { SoundBoard } from "@/game/audio";
 import { GameEngine, type FeedBlock, type GameEvent } from "@/game/engine";
 import { formatWon } from "@/game/format";
@@ -159,7 +159,10 @@ export default function Game() {
           }
           break;
         case "hazardTreated":
-          if (e.done) announce(`${HAZARDS[e.kind].name} 처리 완료`);
+          if (e.torn) {
+            toast("warn", `테이프를 떼다 서류가 찢어졌어요 (수익 ×${TORN_MULT})`);
+            announce("테이프를 떼다 서류가 찢어졌어요. 수익이 줄어요");
+          } else if (e.done) announce(`${HAZARDS[e.kind].name} 처리 완료`);
           break;
         case "hazardUnlocked":
           toast("warn", `새 방해 요소: ${HAZARDS[e.kind].name} — ${HAZARDS[e.kind].tip}`, 6000);
@@ -340,7 +343,11 @@ export default function Game() {
           onImages={addImages}
         />
         {selected && selected.pendingCount > 0 && (
-          <Workbench doc={selected} onTreat={(i) => engine.treatHazard(selected.id, i)} />
+          <Workbench
+            doc={selected}
+            tools={snap.tools}
+            onTreat={(i, page) => engine.treatHazard(selected.id, i, page)}
+          />
         )}
         <ActionBar
           snap={snap}

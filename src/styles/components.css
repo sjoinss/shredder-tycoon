@@ -1375,6 +1375,101 @@ kbd {
 .hazard-hit--chip:hover {
   background: #fbeeb0;
 }
+/* 테이프: 줄 전체가 드래그 영역 (왼쪽 끝 기준, 세로만 가운데 정렬) */
+.hazard-hit--tape {
+  height: var(--touch-target);
+  transform: translateY(-50%);
+  border-radius: var(--radius-sm);
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-postit-text);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  animation: none;
+}
+.hazard-hit--tape span {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-postit);
+}
+.workbench__torn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  color: var(--color-error);
+}
+[data-theme="night"] .workbench__torn {
+  color: #f19d95;
+}
+
+/* 앨범 파일: 페이지 넘기기 */
+.album {
+  display: grid;
+  gap: var(--space-xs);
+  justify-items: center;
+  max-width: 100%;
+}
+.album__page {
+  border-radius: var(--radius-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.album__page:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.album__empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 2px 10px;
+  border: 1.5px dashed var(--color-ink-line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.8);
+  color: #44505a;
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.album__take {
+  left: 50%;
+  top: 82%;
+}
+.album__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.album__btn {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+}
+.album__btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+.album__count {
+  min-width: 4em;
+  text-align: center;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.doc-card__sheets {
+  position: absolute;
+  top: 66px;
+  right: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-ink-line);
+  color: #fff;
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+}
 @keyframes hazard-pulse {
   50% {
     transform: translate(-50%, -50%) scale(1.12);
@@ -1438,4 +1533,8 @@ kbd {
   height: 20px;
   margin: 0;
   accent-color: var(--color-primary);
+}
+.upgrades__note {
+  margin-top: var(--space-sm);
+  font-size: var(--font-size-xs);
 }
