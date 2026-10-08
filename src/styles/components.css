@@ -1543,3 +1543,174 @@ kbd {
   color: var(--color-muted);
   font-weight: 400;
 }
+
+/* ---------- 의뢰 게시판 ---------- */
+.orders {
+  display: grid;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-surface-2);
+  border: var(--line) solid var(--color-ink-line);
+  border-radius: var(--radius-lg);
+}
+.goals .orders {
+  padding: 0;
+  background: none;
+  border: none;
+}
+.orders__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-md);
+}
+.orders__rep {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.orders__empty {
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}
+.orders__list {
+  display: grid;
+  gap: var(--space-sm);
+}
+.order {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1.5px solid var(--color-ink-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--font-size-sm);
+}
+.order--active {
+  border-width: var(--line);
+  box-shadow: var(--shadow-offset) var(--color-ink-line);
+}
+.order__top,
+.order__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+}
+.order__client {
+  font-weight: 800;
+}
+.order__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.order__time.is-urgent {
+  color: var(--color-error);
+  font-weight: 800;
+}
+[data-theme="night"] .order__time.is-urgent {
+  color: #f19d95;
+}
+.order__title {
+  font-weight: 700;
+}
+.order__warn {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-error);
+}
+.order__bar {
+  height: 8px;
+  border: 1.5px solid var(--color-ink-line);
+  border-radius: 999px;
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+.order__bar span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s ease;
+}
+.order__progress {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.order__reward {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.order__btn,
+.order__abandon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-sm);
+  border: 1.5px solid var(--color-ink-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 800;
+  cursor: pointer;
+}
+.order__btn--accept {
+  margin-left: auto;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.order__btn[aria-disabled="true"] {
+  background: var(--color-surface-2);
+  color: var(--color-muted);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.order__abandon {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+
+/* ---------- 지점 확장 ---------- */
+.prestige__req {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-muted);
+}
+.prestige__req li.is-done {
+  color: var(--color-text);
+  font-weight: 700;
+}
+.buy-btn.is-confirm {
+  background: var(--color-stamp);
+  color: #fff;
+}
+.certs {
+  margin-top: 6px;
+  font-size: var(--font-size-xs);
+}
+.certs summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.certs ol {
+  display: grid;
+  gap: 2px;
+  padding-left: var(--space-md);
+}

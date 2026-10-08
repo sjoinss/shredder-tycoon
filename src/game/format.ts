@@ -23,3 +23,23 @@ function trimZeros(s: string) {
 }
 
 export const formatSeconds = (s: number) => `${Math.max(0, s).toFixed(1)}초`;
+
+/** 남은 시간 m:ss (1시간 넘으면 h:mm:ss) */
+export function formatClock(s: number): string {
+  const t = Math.max(0, Math.ceil(s));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = String(t % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+/** 길이 표기: "1시간 20분", "5분", "40초" */
+export function formatDuration(s: number): string {
+  const t = Math.max(0, Math.round(s));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
+  const sec = t % 60;
+  if (m > 0) return m < 10 && sec > 0 ? `${m}분 ${sec}초` : `${m}분`;
+  return `${t}초`;
+}

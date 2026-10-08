@@ -1,6 +1,19 @@
 import {
   ALBUM,
   BIN,
+  CLIENTS,
+  FEEDER_HEAT_LIMIT,
+  JANITOR_SHARE,
+  OFFLINE,
+  ORDERS,
+  PRESTIGE,
+  branchMult,
+  compactorMult,
+  feedDelay,
+  offlineCapHours,
+  recycleMult,
+  repMult,
+  sorterInterval,
   CONTAINER_KINDS,
   CUT_GRADES,
   ENVELOPE_OPENED,
@@ -38,7 +51,17 @@ import {
   type UpgradeId,
 } from "./data";
 import { createRng, randomSeed, type Rng } from "./rng";
-import { clearSave, defaultSave, loadSave, writeSave, type DocData, type Hazard, type SaveData } from "./save";
+import {
+  clearSave,
+  defaultSave,
+  loadSave,
+  writeSave,
+  type Certificate,
+  type DocData,
+  type Hazard,
+  type Order,
+  type SaveData,
+} from "./save";
 
 export type Phase = "idle" | "shredding" | "cooldown";
 /** 통 비우기 단계: 꺼내기 → 묶기 → 수거함에 넣기 → (터지면 쓸기) → 새 봉투 끼우기 */
@@ -63,12 +86,18 @@ export type GameEvent =
   | { type: "tieTap"; taps: number }
   | { type: "bagBurst" }
   | { type: "sweep"; left: number }
-  | { type: "binEmptied"; reward: number; bonus: boolean; burst: boolean }
+  | { type: "binEmptied"; reward: number; bonus: boolean; burst: boolean; auto?: boolean }
+  | { type: "janitorNoBags" }
+  | { type: "orderOffered"; order: Order }
+  | { type: "orderAccepted"; order: Order }
+  | { type: "orderDone"; order: Order }
+  | { type: "orderFailed"; order: Order }
+  | { type: "prestige"; certificate: Certificate }
   | { type: "jam"; heavy: boolean }
   | { type: "reverse"; on: boolean }
   | { type: "jamPull"; pulled: number }
   | { type: "jamCleared"; lost: boolean; docs: DocData[] }
-  | { type: "hazardTreated"; docId: number; kind: HazardKind; done: boolean; torn?: boolean }
+  | { type: "hazardTreated"; docId: number; kind: HazardKind; done: boolean; torn?: boolean; auto?: boolean }
   | { type: "hazardUnlocked"; kind: HazardKind }
   | { type: "templateUnlocked"; template: TemplateId }
   | { type: "tierUp"; tier: number }
@@ -182,6 +211,16 @@ export interface Snapshot {
   upgrades: Record<UpgradeId, UpgradeView>;
   affordableCount: number;
   loadError: string | null;
+  reputation: number;
+  /** 평판 × 지점 확장 수익 배율 */
+  bonusMult: number;
+  ordersUnlocked: boolean;
+  offers: Order[];
+  activeOrder: Order | null;
+  branches: number;
+  certificates: Certificate[];
+  canPrestige: boolean;
+  automation: { sorter: number; autoFeed: number; janitor: number };
 }
 
 const STEP = 1 / 60;
@@ -204,7 +243,7 @@ export const docLoad = (d: DocData) => docSheets(d) * (TEMPLATES[d.template].loa
 /** 전용 슬롯으로 넣는 물건 (카드/CD) */
 export const isSlotDoc = (d: DocData) => !!TEMPLATES[d.template].slot;
 
-const baseValue = (d: DocData, tier: number, treated: number) =>
+const baseValue = (d: DocData, tier: number, treated: number, mult = 1) =>
   Math.round(
     TEMPLATES[d.template].baseValue *
       docSheets(d) *
@@ -212,11 +251,12 @@ const baseValue = (d: DocData, tier: number, treated: number) =>
       TIERS[tier].mult *
       CUT_GRADES[TIERS[tier].grade].mult *
       (d.torn ? TORN_MULT : 1) *
-      (1 + HAZARD_BONUS * treated),
+      (1 + HAZARD_BONUS * treated) *
+      mult,
   );
 
 /** 수익: 직접 처리한 방해 요소 하나당 +20% */
-export const docValue = (d: DocData, tier = 0) => baseValue(d, tier, removedHazards(d));
+export const docValue = (d: DocData, tier = 0, mult = 1) => baseValue(d, tier, removedHazards(d), mult);
 
 export interface ToolLevels {
   stapleRemover: number;
@@ -334,6 +374,7 @@ export class GameEngine {
     }
     this.arrivalLeft = arrivalInterval(this.data.levels.inbox);
     this.selectedId = this.data.tray[0]?.id ?? null;
+    if (result.ok && !result.fresh) this.applyOffline();
   }
 
   // ---------- 파쇄기 본체 ----------
@@ -353,7 +394,9 @@ export class GameEngine {
 
   /** 통이 담는 A4 장수 (잘게 자를수록 촘촘히 쌓여 더 들어감) */
   binCap() {
-    return Math.round(binCapacity(this.data.levels.bin) * CUT_GRADES[this.grade].pack);
+    return Math.round(
+      binCapacity(this.data.levels.bin) * CUT_GRADES[this.grade].pack * compactorMult(this.data.levels.compactor),
+    );
   }
 
   /** 다음 본체로 교체 */
@@ -496,6 +539,290 @@ export class GameEngine {
       this.arrivalLeft = arrivalInterval(d.levels.inbox);
       this.emit({ type: "trayFull" });
     }
+
+    if (!this.loadError) {
+      this.stepAutomation(dt);
+      this.stepOrders(dt);
+    }
+  }
+
+  // ---------- 자동화 (직원) ----------
+  private sorterTimer = 0;
+  private feederTimer = 0;
+  private janitorWarned = false;
+
+  private stepAutomation(dt: number) {
+    const d = this.data;
+    // 정리 알바: 일정 간격으로 방해 요소 하나에 한 번 손댐 (작업 중인 선택 서류는 피해서)
+    if (d.levels.sorter > 0) {
+      this.sorterTimer += dt;
+      if (this.sorterTimer >= sorterInterval(d.levels.sorter)) {
+        this.sorterTimer = 0;
+        this.sorterWork();
+      }
+    }
+
+    // 급지 담당: 준비되면 잠시 뒤 처리할 게 없는 서류를 넣는다
+    if (d.levels.autoFeed > 0 && this.phase === "idle" && !this.feedBlock() && d.heat < FEEDER_HEAT_LIMIT) {
+      const safe = d.tray.find((doc) => pendingHazards(doc).length === 0);
+      if (safe) {
+        this.feederTimer += dt;
+        if (this.feederTimer >= feedDelay(d.levels.autoFeed)) {
+          this.feederTimer = 0;
+          // 사용자가 고른 서류가 안전하면 그대로, 아니면 안전한 서류로 바꿔서 넣는다
+          const chosen = d.tray.find((doc) => doc.id === this.selectedId);
+          const keep = chosen && pendingHazards(chosen).length === 0;
+          const before = this.selectedId;
+          if (!keep) this.selectedId = safe.id;
+          // 묶음에 위험한 서류가 끼지 않게: 안전한 서류만 남긴 묶음으로 투입
+          if (!this.feed(true) && !keep) this.selectedId = before;
+        }
+      } else this.feederTimer = 0;
+    } else this.feederTimer = 0;
+
+    // 청소 담당: 통이 80% 이상이고 파쇄 중이 아니면 비운다
+    if (d.levels.janitor > 0 && !this.emptyStep && this.phase !== "shredding" && d.binFill >= BIN.warnAt) {
+      if (d.bags <= 0) {
+        if (!this.janitorWarned) {
+          this.janitorWarned = true;
+          this.emit({ type: "janitorNoBags" });
+        }
+      } else {
+        this.janitorWarned = false;
+        const { reward } = this.recycleValue(d.binFill);
+        const paid = Math.round(reward * JANITOR_SHARE);
+        d.binFill = 0;
+        d.bags--;
+        d.money += paid;
+        d.totalEarned += paid;
+        this.emit({ type: "binEmptied", reward: paid, bonus: false, burst: false, auto: true });
+        this.emitChange();
+      }
+    }
+  }
+
+  /** 정리 알바 한 번: 트레이에서 처리할 수 있는 방해 요소 하나에 손댄다 */
+  private sorterWork() {
+    // 선택한 서류는 사용자가 만지는 중일 수 있으니 뒤로 미룬다
+    const docs = [...this.data.tray].sort((a, b) => Number(a.id === this.selectedId) - Number(b.id === this.selectedId));
+    for (const doc of docs) {
+      const pending = doc.hazards.map((h, i) => ({ h, i })).filter(({ h }) => h.left > 0);
+      if (!pending.length) continue;
+      // 감싼 것부터 (안쪽은 꺼낸 뒤에야 만질 수 있음)
+      const wrap = pending.find(({ h }) => isContainer(h.kind));
+      const pick = wrap ?? pending.find(({ h }) => !HAZARDS[h.kind].tool || this.data.levels[HAZARDS[h.kind].tool!] > 0);
+      if (!pick) continue;
+      const page = pick.h.kind === "album" ? pick.h.pages?.indexOf(PAGE_DOC) : undefined;
+      this.treatHazard(doc.id, pick.i, page, true);
+      return;
+    }
+  }
+
+  // ---------- 의뢰 ----------
+  private offerTimer = 0;
+
+  ordersUnlocked() {
+    return this.data.totalShredded >= ORDERS.unlockAt || this.data.branches > 0;
+  }
+
+  private stepOrders(dt: number) {
+    const o = this.data.orders;
+    if (!this.ordersUnlocked()) return;
+    if (o.offers.length < ORDERS.maxOffers) {
+      this.offerTimer -= dt;
+      if (this.offerTimer <= 0) {
+        this.offerTimer = ORDERS.offerEvery;
+        const order = this.makeOrder();
+        o.offers.push(order);
+        this.emit({ type: "orderOffered", order });
+        this.emitChange();
+      }
+    }
+    const a = o.active;
+    if (a) {
+      a.left = Math.max(0, a.left - dt);
+      if (a.left <= 0) {
+        o.active = null;
+        this.data.reputation = Math.max(0, this.data.reputation - ORDERS.failRep);
+        this.emit({ type: "orderFailed", order: a });
+        this.emitChange();
+        this.save();
+      }
+    }
+  }
+
+  private makeOrder(): Order {
+    const d = this.data;
+    const rng = createRng(randomSeed());
+    // 지금 받을 수 있는 종이 서류 양식 (카드·CD는 슬롯이 있을 때만)
+    const ids = TEMPLATE_IDS.filter((id) => {
+      const t = TEMPLATES[id];
+      return d.totalShredded >= (t.unlockAt ?? 0) && d.tier >= (t.minTier ?? 0);
+    });
+    const template = rng.chance(0.4) ? null : rng.pick(ids);
+    const minTier = rng.int(0, d.tier);
+    const special = template !== null && TEMPLATES[template].slot;
+    const base = special ? rng.int(3, 6) : rng.int(12, 30);
+    const count = Math.round(base * (1 + d.tier * 0.4) * (template === null ? 1.5 : 1));
+    // 지금 장비로 한 장 가는 데 걸리는 대략의 시간 × 여유
+    const perSheet = (shredTime(d.levels.speed) * this.tier.time + cooldownTime(d.levels.cooldown)) / Math.max(1, special ? 1 : this.capacity());
+    // 이 양식이 도착하는 간격: 전체 도착 간격 ÷ 이 양식의 비중 (아무 서류면 종이 서류 전체 비중)
+    const weight = (id: TemplateId) => TEMPLATES[id].weight;
+    const total = ids.reduce((sum, id) => sum + weight(id), 0);
+    const share =
+      template === null ? ids.filter((id) => !TEMPLATES[id].slot).reduce((sum, id) => sum + weight(id), 0) / total : weight(template) / total;
+    const arrival = arrivalInterval(d.levels.inbox) / share;
+    const time = Math.round(Math.max(90, count * Math.max(perSheet, arrival) * 1.5) / 10) * 10;
+    const value = template === null ? 11 : TEMPLATES[template].baseValue;
+    return {
+      id: d.orders.nextId++,
+      client: rng.pick(CLIENTS),
+      template,
+      count,
+      minTier,
+      time,
+      left: time,
+      progress: 0,
+      reward: Math.round(count * value * TIERS[minTier].mult * ORDERS.rewardMult * this.bonusMult()),
+      rep: 1 + Math.floor(count / 15) + minTier,
+    };
+  }
+
+  acceptOrder(id: number) {
+    const o = this.data.orders;
+    if (this.loadError) return false;
+    if (o.active) return this.fail("이미 진행 중인 의뢰가 있어요");
+    const order = o.offers.find((x) => x.id === id);
+    if (!order) return false;
+    o.offers = o.offers.filter((x) => x !== order);
+    order.left = order.time;
+    order.progress = 0;
+    o.active = order;
+    // 받은 자리는 곧 새 의뢰로 채운다
+    this.offerTimer = Math.min(this.offerTimer, ORDERS.offerEvery / 3);
+    this.emit({ type: "orderAccepted", order });
+    this.emitChange();
+    this.save();
+    return true;
+  }
+
+  declineOrder(id: number) {
+    const o = this.data.orders;
+    o.offers = o.offers.filter((x) => x.id !== id);
+    this.emitChange();
+  }
+
+  /** 진행 중인 의뢰 포기 (평판이 깎인다) */
+  abandonOrder() {
+    const a = this.data.orders.active;
+    if (!a) return;
+    this.data.orders.active = null;
+    this.data.reputation = Math.max(0, this.data.reputation - ORDERS.failRep);
+    this.emit({ type: "orderFailed", order: a });
+    this.emitChange();
+    this.save();
+  }
+
+  private progressOrder(docs: DocData[]) {
+    const d = this.data;
+    const a = d.orders.active;
+    if (!a || d.tier < a.minTier) return;
+    const n = docs
+      .filter((doc) => (a.template === null ? !isSlotDoc(doc) && !doc.image : doc.template === a.template))
+      .reduce((s, doc) => s + docSheets(doc), 0);
+    if (!n) return;
+    a.progress = Math.min(a.count, a.progress + n);
+    if (a.progress >= a.count) {
+      d.orders.active = null;
+      d.money += a.reward;
+      d.totalEarned += a.reward;
+      d.reputation += a.rep;
+      this.emit({ type: "orderDone", order: a });
+      this.save();
+    }
+  }
+
+  /** 평판·지점 확장으로 붙는 수익 배율 */
+  bonusMult() {
+    return repMult(this.data.reputation) * branchMult(this.data.branches);
+  }
+
+  // ---------- 오프라인 수익 ----------
+  /** 자리를 비운 동안 번 돈 (Game이 처음 붙을 때 한 번 꺼내 감) */
+  private offlineReport: { seconds: number; reward: number; capped: boolean } | null = null;
+
+  takeOfflineReport() {
+    const r = this.offlineReport;
+    this.offlineReport = null;
+    return r;
+  }
+
+  /** 급지 담당이 혼자 돌릴 때의 초당 수익 추정 (도착 속도와 파쇄 속도 중 느린 쪽) */
+  private estimateRate() {
+    const d = this.data;
+    const ids = TEMPLATE_IDS.filter((id) => {
+      const t = TEMPLATES[id];
+      return !t.slot && d.totalShredded >= (t.unlockAt ?? 0);
+    });
+    const weight = ids.reduce((s, id) => s + TEMPLATES[id].weight, 0);
+    const avg = ids.reduce((s, id) => s + TEMPLATES[id].baseValue * TEMPLATES[id].weight, 0) / Math.max(1, weight);
+    const perDoc = avg * this.tier.mult * this.bonusMult();
+    const cap = this.capacity();
+    const cycle =
+      shredTime(d.levels.speed) * this.tier.time * 0.85 * (1 + 0.08 * (cap - 1)) +
+      cooldownTime(d.levels.cooldown) +
+      feedDelay(d.levels.autoFeed);
+    const byShred = (perDoc * cap) / cycle;
+    const byArrival = perDoc / arrivalInterval(d.levels.inbox);
+    return Math.min(byShred, byArrival) * OFFLINE.efficiency;
+  }
+
+  private applyOffline() {
+    const d = this.data;
+    if (!d.lastSeen || d.levels.autoFeed <= 0) return;
+    const away = (Date.now() - d.lastSeen) / 1000;
+    if (!(away >= OFFLINE.minAway)) return;
+    const cap = offlineCapHours(d.levels.autoFeed) * 3600;
+    const seconds = Math.min(away, cap);
+    const reward = Math.round(this.estimateRate() * seconds);
+    if (reward <= 0) return;
+    d.money += reward;
+    d.totalEarned += reward;
+    this.offlineReport = { seconds, reward, capped: away > cap };
+  }
+
+  // ---------- 지점 확장 (프레스티지) ----------
+  canPrestige() {
+    return this.data.tier >= PRESTIGE.minTier && this.data.totalEarned >= PRESTIGE.minEarned;
+  }
+
+  /** 지금 지점을 정리하고 새 지점을 연다: 진행은 처음부터, 영구 배율 + 파기 증명서 */
+  prestige() {
+    if (this.loadError || !this.canPrestige()) return false;
+    if (this.phase === "shredding" || this.emptyStep) return this.fail("작업을 마친 뒤에 지점을 확장할 수 있어요");
+    const old = this.data;
+    const branch = old.branches + 1;
+    const cert: Certificate = {
+      branch,
+      date: new Date().toISOString().slice(0, 10),
+      shredded: old.totalShredded,
+      earned: Math.floor(old.totalEarned),
+      tier: old.tier,
+    };
+    const next = defaultSave();
+    next.branches = branch;
+    next.certificates = [...old.certificates, cert];
+    next.nextDocId = old.nextDocId;
+    this.data = next;
+    this.seedStarterDocs();
+    this.incomeLog = [];
+    this.resetTransient();
+    this.arrivalLeft = arrivalInterval(0);
+    this.save();
+    this.emit({ type: "prestige", certificate: cert });
+    this.emit({ type: "reset" });
+    this.emitChange();
+    return true;
   }
 
   // ---------- 투입 ----------
@@ -519,7 +846,7 @@ export class GameEngine {
    * 다음 투입 묶음: 선택한 서류 + 트레이 순서대로 용량(장수)만큼. 첫 서류는 용량을 넘어도 들어간다(대신 잘 걸림).
    * 카드/CD는 전용 슬롯으로 하나씩만, 종이 묶음에는 끼지 않는다.
    */
-  batch(): DocData[] {
+  batch(safeOnly = false): DocData[] {
     const tray = this.data.tray;
     const cap = this.capacity();
     const first = tray.find((d) => d.id === this.selectedId) ?? tray[0];
@@ -529,6 +856,7 @@ export class GameEngine {
     let load = docLoad(first);
     for (const d of tray) {
       if (d === first || isSlotDoc(d)) continue;
+      if (safeOnly && pendingHazards(d).length > 0) continue;
       if (load + docLoad(d) > cap) continue;
       out.push(d);
       load += docLoad(d);
@@ -536,9 +864,10 @@ export class GameEngine {
     return out;
   }
 
-  feed(): boolean {
+  /** auto: 급지 담당이 넣을 때는 처리할 게 없는 서류만 묶는다 */
+  feed(auto = false): boolean {
     if (this.feedBlock()) return false;
-    const docs = this.batch();
+    const docs = this.batch(auto);
     const firstIdx = this.data.tray.indexOf(docs[0]);
     this.data.tray = this.data.tray.filter((d) => !docs.includes(d));
 
@@ -585,7 +914,8 @@ export class GameEngine {
   private finishShred() {
     const d = this.data;
     const docs = this.current!.docs;
-    const reward = docs.reduce((s, doc) => s + docValue(doc, d.tier), 0);
+    const mult = this.bonusMult();
+    const reward = docs.reduce((s, doc) => s + docValue(doc, d.tier, mult), 0);
     d.money += reward;
     d.totalEarned += reward;
     const shreddedBefore = d.totalShredded;
@@ -609,6 +939,7 @@ export class GameEngine {
     this.phaseTotal = cooldownTime(d.levels.cooldown);
     this.phaseLeft = this.phaseTotal;
     this.emit({ type: "shredDone", docs, reward });
+    this.progressOrder(docs);
 
     if (before < BIN.warnAt && d.binFill >= BIN.warnAt && d.binFill < 1) this.emit({ type: "binWarn" });
     if (before < 1 && d.binFill >= 1) this.emit({ type: "binFull" });
@@ -689,7 +1020,7 @@ export class GameEngine {
    * 서류의 방해 요소 하나에 한 번 손을 댄다 (다 하면 제거). 도구가 있으면 한 번에 더 많이 처리.
    * 앨범 파일은 꺼낼 페이지 번호를 함께 받는다.
    */
-  treatHazard(docId: number, index: number, page?: number) {
+  treatHazard(docId: number, index: number, page?: number, auto = false) {
     const doc = this.data.tray.find((d) => d.id === docId);
     const h = doc?.hazards[index];
     if (!doc || !h || h.left <= 0) return;
@@ -743,7 +1074,7 @@ export class GameEngine {
         h.left--;
     }
     if (h.left === 0) h.removed = true;
-    this.emit({ type: "hazardTreated", docId, kind: h.kind, done: h.left === 0, torn });
+    this.emit({ type: "hazardTreated", docId, kind: h.kind, done: h.left === 0, torn, auto });
     this.emitChange();
   }
 
@@ -880,7 +1211,8 @@ export class GameEngine {
 
   private recycleValue(fill: number) {
     const bonus = fill >= BIN.warnAt && fill < 1;
-    const value = fill * this.binCap() * CUT_GRADES[this.grade].pulpPrice * (bonus ? BIN.bonusMult : 1);
+    const value =
+      fill * this.binCap() * CUT_GRADES[this.grade].pulpPrice * recycleMult(this.data.levels.recycle) * (bonus ? BIN.bonusMult : 1);
     return { reward: Math.round(value), bonus };
   }
 
@@ -1017,6 +1349,7 @@ export class GameEngine {
   // ---------- 저장 ----------
   save() {
     this.saveTimer = 0;
+    this.data.lastSeen = Date.now();
     if (this.loadError) return;
     // 내 이미지 서류는 저장하지 않는다 (새로고침하면 사라짐)
     const data = { ...this.data, tray: this.data.tray.filter((d) => !d.image) };
@@ -1079,6 +1412,7 @@ export class GameEngine {
 
   private buildSnapshot(): Snapshot {
     const d = this.data;
+    const mult = this.bonusMult();
     const upgrades = {} as Record<UpgradeId, UpgradeView>;
     let affordableCount = 0;
     for (const def of UPGRADES) {
@@ -1107,8 +1441,8 @@ export class GameEngine {
           ...doc,
           // 렌더 중에 엔진이 바꾸지 않도록 방해 요소는 복사본으로
           hazards: doc.hazards.map((h) => ({ ...h, pages: h.pages && [...h.pages] })),
-          value: docValue(doc, d.tier),
-          potentialValue: baseValue(doc, d.tier, removedHazards(doc) + pending.length),
+          value: docValue(doc, d.tier, mult),
+          potentialValue: baseValue(doc, d.tier, removedHazards(doc) + pending.length, mult),
           pendingCount: pending.length,
           jamRisk: jamChance(doc, d.tier),
           load: docLoad(doc),
@@ -1155,6 +1489,15 @@ export class GameEngine {
       upgrades,
       affordableCount,
       loadError: this.loadError,
+      reputation: d.reputation,
+      bonusMult: mult,
+      ordersUnlocked: this.ordersUnlocked(),
+      offers: d.orders.offers.map((o) => ({ ...o })),
+      activeOrder: d.orders.active ? { ...d.orders.active } : null,
+      branches: d.branches,
+      certificates: d.certificates,
+      canPrestige: this.canPrestige(),
+      automation: { sorter: d.levels.sorter, autoFeed: d.levels.autoFeed, janitor: d.levels.janitor },
     };
   }
 }

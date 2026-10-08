@@ -14,7 +14,12 @@ export type UpgradeId =
   | "stapleRemover"
   | "cutter"
   | "letterOpener"
-  | "scissors";
+  | "scissors"
+  | "sorter"
+  | "autoFeed"
+  | "janitor"
+  | "compactor"
+  | "recycle";
 export type UpgradeTab = "shredder" | "tools" | "automation" | "facility";
 export type CutGradeId = "P-1" | "P-3" | "P-4" | "P-5";
 
@@ -516,6 +521,57 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 1,
     effect: (lv) => (lv > 0 ? "칩 자르기 가능" : "없음"),
   },
+  {
+    id: "sorter",
+    tab: "automation",
+    name: "정리 알바",
+    desc: "트레이 서류의 방해 요소를 알아서 처리 (도구가 필요한 건 도구가 있어야)",
+    baseCost: 800,
+    growth: 2.5,
+    maxLevel: 3,
+    effect: (lv) => (lv > 0 ? `${sorterInterval(lv)}초마다 1번` : "없음"),
+  },
+  {
+    id: "autoFeed",
+    tab: "automation",
+    name: "급지 담당",
+    desc: "처리할 게 없는 서류를 알아서 투입 (열 75% 이상이면 쉼). 자리를 비운 동안에도 일부 벌어요",
+    baseCost: 2000,
+    growth: 3,
+    maxLevel: 3,
+    effect: (lv) =>
+      lv > 0 ? `${FEEDER_NAMES[lv - 1]} · ${feedDelay(lv)}초 뒤 · 오프라인 ${offlineCapHours(lv)}시간` : "없음",
+  },
+  {
+    id: "janitor",
+    tab: "automation",
+    name: "청소 담당",
+    desc: "통이 80% 차면 알아서 비움 (폐지 수익은 70%만, 봉투는 씀)",
+    baseCost: 3000,
+    growth: 1,
+    maxLevel: 1,
+    effect: (lv) => (lv > 0 ? "자동 비우기" : "없음"),
+  },
+  {
+    id: "compactor",
+    tab: "facility",
+    name: "폐지 압축기",
+    desc: "같은 통에 조각을 눌러 담음",
+    baseCost: 6000,
+    growth: 1,
+    maxLevel: 1,
+    effect: (lv) => `통 용량 ×${compactorMult(lv)}`,
+  },
+  {
+    id: "recycle",
+    tab: "facility",
+    name: "재활용 업체 계약",
+    desc: "폐지 단가 인상",
+    baseCost: 1500,
+    growth: 1.6,
+    maxLevel: 5,
+    effect: (lv) => `폐지 ×${recycleMult(lv).toFixed(2)}`,
+  },
 ];
 
 export const upgradeCost = (def: UpgradeDef, level: number) =>
@@ -524,6 +580,58 @@ export const upgradeCost = (def: UpgradeDef, level: number) =>
 export const TABS: { id: UpgradeTab; label: string; lockedNote?: string; note?: string }[] = [
   { id: "shredder", label: "파쇄기" },
   { id: "tools", label: "도구", note: "라벨 리무버는 코팅 서류가 들어오면 입고돼요." },
-  { id: "automation", label: "자동화", lockedNote: "알바생과 자동 급지 장치는 사무실이 커지면 들어와요." },
+  { id: "automation", label: "자동화" },
   { id: "facility", label: "시설" },
 ];
+
+// ---------- 자동화 ----------
+const FEEDER_NAMES = ["급지 알바", "급지 담당", "자동 급지 장치"];
+/** 정리 알바가 방해 요소에 한 번 손대는 간격(초) */
+export const sorterInterval = (lv: number) => [0, 5, 3, 1.8][Math.min(lv, 3)];
+/** 급지 담당이 준비된 뒤 투입하기까지(초) */
+export const feedDelay = (lv: number) => [0, 4, 2, 0.7][Math.min(lv, 3)];
+/** 자리를 비운 동안 벌 수 있는 최대 시간 */
+export const offlineCapHours = (lv: number) => [0, 1, 2, 4][Math.min(lv, 3)];
+/** 급지 담당은 열이 이만큼 이상이면 쉰다 */
+export const FEEDER_HEAT_LIMIT = 75;
+/** 청소 담당이 비울 때 받는 폐지 수익 비율 */
+export const JANITOR_SHARE = 0.7;
+export const compactorMult = (lv: number) => (lv > 0 ? 2 : 1);
+export const recycleMult = (lv: number) => 1 + 0.25 * lv;
+
+/** 오프라인 수익 규칙: 실제 플레이보다 덜 번다 (과열·통·방해 요소를 처리할 사람이 없음) */
+export const OFFLINE = {
+  efficiency: 0.35,
+  /** 이보다 짧게 비웠으면 계산하지 않음(초) */
+  minAway: 60,
+};
+
+// ---------- 의뢰 / 평판 ----------
+export const CLIENTS = ["한빛상사", "푸른회계사무소", "새솔법무법인", "다온의원", "미래물산", "청람건설", "온누리여행사", "가람출판"];
+
+export const ORDERS = {
+  /** 누적 파쇄 장수가 이만큼 되면 의뢰가 들어옴 */
+  unlockAt: 40,
+  maxOffers: 3,
+  /** 새 의뢰가 들어오는 간격(초) */
+  offerEvery: 45,
+  /** 같은 양을 그냥 갈 때보다 더 주는 배율 */
+  rewardMult: 2.5,
+  /** 시간 안에 못 끝내면 잃는 평판 */
+  failRep: 2,
+};
+
+/** 평판 1점당 수익 +0.5% (최대 +100%) */
+export const repMult = (rep: number) => 1 + Math.min(rep, 200) * 0.005;
+
+// ---------- 지점 확장 (프레스티지) ----------
+export const PRESTIGE = {
+  /** 이 티어(0부터) 이상 본체가 있어야 함 */
+  minTier: 3,
+  /** 이번 지점에서 번 돈이 이만큼 있어야 함 */
+  minEarned: 200000,
+  /** 지점 하나당 영구 수익 배율 */
+  perBranch: 0.5,
+};
+
+export const branchMult = (branches: number) => 1 + PRESTIGE.perBranch * branches;

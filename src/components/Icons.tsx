@@ -209,7 +209,65 @@ export const IconScissors = (p: IconProps) => (
   </Svg>
 );
 
+/** 자동 급지: 종이 더미 + 아래로 화살표 */
+export const IconFeeder = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 4h14v6H5z" />
+    <path d="M8 7h8" />
+    <path d="M12 12.5v7M8.5 16.5l3.5 3.5 3.5-3.5" />
+  </Svg>
+);
+
+export const IconBroom = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17.5 3l-6 9" />
+    <path d="M8.5 11.5l5.5 3-2 6.5c-3 0-6.5-1.5-8.5-4z" />
+    <path d="M7 16.5l2.5 1.5" />
+  </Svg>
+);
+
+/** 압축기: 위에서 누르는 판 */
+export const IconPress = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 2.5v6M9 6l3 3 3-3" />
+    <path d="M4.5 11h15" />
+    <path d="M6 14h12v6.5H6z" />
+  </Svg>
+);
+
+export const IconRecycle = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 5.5l3-2.5 3 5" />
+    <path d="M14.5 4.5L17 9l-4.5.5" />
+    <path d="M19.5 13l1.5 3-3 4.5h-5" />
+    <path d="M14.5 18l-2 2.5 2 2" />
+    <path d="M6.5 20.5H4l-1.5-3L5 13" />
+    <path d="M3 15l2-2 2.5 1.5" />
+  </Svg>
+);
+
+export const IconBuilding = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 21V7l8-4 8 4v14z" />
+    <path d="M9 21v-5h6v5M8 9.5h2M14 9.5h2M8 13h2M14 13h2" />
+  </Svg>
+);
+
+export const IconCertificate = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 4h16v12H4z" />
+    <path d="M7.5 8h9M7.5 11h5" />
+    <circle cx="16" cy="16" r="2.5" />
+    <path d="M14.5 18l-.5 3.5 2-1 2 1-.5-3.5" />
+  </Svg>
+);
+
 export const UPGRADE_ICONS = {
+  sorter: IconHand,
+  autoFeed: IconFeeder,
+  janitor: IconBroom,
+  compactor: IconPress,
+  recycle: IconRecycle,
   scissors: IconScissors,
   stapleRemover: IconStapleRemover,
   cutter: IconCutter,

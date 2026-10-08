@@ -124,6 +124,7 @@ export class SoundBoard {
         else this.motorStart(speedFactor, 3);
         break;
       case "hazardTreated":
+        if (e.auto) break;
         this.hazardSound(e.kind, e.done);
         break;
       case "hazardUnlocked":

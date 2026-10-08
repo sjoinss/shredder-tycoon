@@ -1,10 +1,10 @@
 "use client";
 
-import { useRef } from "react";
-import { BIN, TABS, UPGRADES, type UpgradeId, type UpgradeTab } from "@/game/data";
+import { useRef, useState } from "react";
+import { BIN, CUT_GRADES, PRESTIGE, TABS, TIERS, UPGRADES, branchMult, type UpgradeId, type UpgradeTab } from "@/game/data";
 import type { Snapshot } from "@/game/engine";
 import { formatWon } from "@/game/format";
-import { IconBag, IconChevronUp, IconLock, IconShred, UPGRADE_ICONS } from "./Icons";
+import { IconBag, IconBuilding, IconCertificate, IconChevronUp, IconLock, IconShred, UPGRADE_ICONS } from "./Icons";
 
 export type SheetState = "collapsed" | "half" | "full";
 const NEXT_SHEET: Record<SheetState, SheetState> = { collapsed: "half", half: "full", full: "collapsed" };
@@ -18,9 +18,20 @@ interface Props {
   onBuy: (id: UpgradeId) => void;
   onBuyBags: () => void;
   onBuyTier: () => void;
+  onPrestige: () => void;
 }
 
-export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, onBuyBags, onBuyTier }: Props) {
+export default function UpgradePanel({
+  snap,
+  tab,
+  sheet,
+  onTab,
+  onSheet,
+  onBuy,
+  onBuyBags,
+  onBuyTier,
+  onPrestige,
+}: Props) {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const drag = useRef<{ y: number; moved: boolean } | null>(null);
 
@@ -167,6 +178,7 @@ export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, 
                 );
               })}
               {tab === "facility" && <BagRow snap={snap} onBuyBags={onBuyBags} />}
+              {tab === "facility" && <PrestigeRow snap={snap} onPrestige={onPrestige} />}
             </ul>
           )}
           {activeTab.note && <p className="postit upgrades__note">{activeTab.note}</p>}
@@ -256,6 +268,82 @@ function BagRow({ snap, onBuyBags }: { snap: Snapshot; onBuyBags: () => void }) 
       >
         <span className="buy-btn__cost">₩{formatWon(snap.bagPackCost)}</span>
         <span className="buy-btn__note">{note}</span>
+      </button>
+    </li>
+  );
+}
+
+/** 지점 확장: 진행을 처음부터 다시 하는 대신 영구 수익 배율 + 파기 증명서. 되돌릴 수 없어 두 번 눌러 확인 */
+function PrestigeRow({ snap, onPrestige }: { snap: Snapshot; onPrestige: () => void }) {
+  const [armed, setArmed] = useState(false);
+  // 조건이 사라지면 확인 상태도 풀린 것으로 본다
+  const confirm = armed && snap.canPrestige;
+  const needTier = TIERS[PRESTIGE.minTier];
+  const tierOk = snap.tier.index >= PRESTIGE.minTier;
+  const earnedOk = snap.totalEarned >= PRESTIGE.minEarned;
+  const now = branchMult(snap.branches);
+  const next = branchMult(snap.branches + 1);
+  return (
+    <li className="ledger__row ledger__row--prestige">
+      <span className="ledger__icon">
+        <IconBuilding />
+      </span>
+      <div className="ledger__main">
+        <h3 className="ledger__name">
+          지점 확장 <span className="ledger__lv">지점 {snap.branches + 1}호</span>
+        </h3>
+        <p className="ledger__desc">
+          돈·업그레이드·본체·평판을 모두 내려놓고 새 지점을 열어요. 대신 영구 수익 ×{now} → <strong>×{next}</strong>, 파기
+          증명서 1장.
+        </p>
+        <ul className="prestige__req">
+          <li className={tierOk ? "is-done" : undefined}>
+            {tierOk ? "✓" : "·"} {needTier.name} 본체 ({CUT_GRADES[needTier.grade].label.split(" ")[0]})
+          </li>
+          <li className={earnedOk ? "is-done" : undefined}>
+            {earnedOk ? "✓" : "·"} 이번 지점 수익 ₩{formatWon(Math.min(snap.totalEarned, PRESTIGE.minEarned))} / ₩
+            {formatWon(PRESTIGE.minEarned)}
+          </li>
+        </ul>
+        {snap.certificates.length > 0 && (
+          <details className="certs">
+            <summary>
+              <IconCertificate size={16} /> 파기 증명서 {snap.certificates.length}장
+            </summary>
+            <ol>
+              {snap.certificates.map((c) => (
+                <li key={c.branch}>
+                  <strong>제{c.branch}호</strong> {c.date} · {c.shredded.toLocaleString("ko-KR")}장 파기 · ₩{formatWon(c.earned)} ·{" "}
+                  {CUT_GRADES[TIERS[c.tier].grade].label}
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </div>
+      <button
+        type="button"
+        className={`buy-btn${confirm ? " is-confirm" : ""}`}
+        aria-disabled={!snap.canPrestige}
+        onClick={() => {
+          if (!snap.canPrestige) return;
+          if (!confirm) {
+            setArmed(true);
+            return;
+          }
+          setArmed(false);
+          onPrestige();
+        }}
+        aria-label={
+          snap.canPrestige
+            ? confirm
+              ? "정말 지점을 확장할까요? 진행이 처음부터 시작돼요. 한 번 더 누르면 확장"
+              : "지점 확장"
+            : "지점 확장 조건 부족"
+        }
+      >
+        <span className="buy-btn__cost">{confirm ? "정말요?" : "확장"}</span>
+        <span className="buy-btn__note">{snap.canPrestige ? (confirm ? "한 번 더 누르기" : "처음부터") : "조건 부족"}</span>
       </button>
     </li>
   );

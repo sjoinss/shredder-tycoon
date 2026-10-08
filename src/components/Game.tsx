@@ -4,23 +4,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CUT_GRADES,
   HAZARDS,
+  ORDERS,
   RARITIES,
   TABS,
   TEMPLATES,
   TIERS,
   TORN_MULT,
   UPGRADES,
+  branchMult,
   shredTime,
   type UpgradeId,
   type UpgradeTab,
 } from "@/game/data";
 import { SoundBoard } from "@/game/audio";
 import { GameEngine, type FeedBlock, type GameEvent } from "@/game/engine";
-import { formatWon } from "@/game/format";
+import { formatDuration, formatWon } from "@/game/format";
 import { registerImageCanvas } from "@/game/render/docgen";
 import { ImagePaperError, MAX_IMAGES_AT_ONCE, makeImagePaper } from "@/game/render/imagepaper";
 import { settingsStore } from "@/game/settings";
 import ActionBar from "./ActionBar";
+import OrdersBoard, { orderTitle } from "./OrdersBoard";
 import Workbench from "./Workbench";
 import Hud from "./Hud";
 import { IconAlert, IconCheck, IconCoin } from "./Icons";
@@ -28,7 +31,7 @@ import SettingsDialog from "./SettingsDialog";
 import ShredStage from "./ShredStage";
 import Tray from "./Tray";
 import UpgradePanel, { type SheetState } from "./UpgradePanel";
-import { useSettings, useSnapshot } from "./hooks";
+import { useMediaQuery, useSettings, useSnapshot } from "./hooks";
 
 type ToastKind = "success" | "money" | "warn" | "error";
 interface Toast {
@@ -52,6 +55,8 @@ export default function Game() {
   const [sound] = useState(() => new SoundBoard(settingsStore.get()));
   const snap = useSnapshot(engine);
   const settings = useSettings();
+  // 넓은 화면은 의뢰 게시판을 오른쪽 업무 일지에, 좁은 화면은 본문에
+  const wide = useMediaQuery("(min-width: 1440px)");
 
   const [tab, setTab] = useState<UpgradeTab>("shredder");
   const [sheet, setSheet] = useState<SheetState>("collapsed");
@@ -134,7 +139,10 @@ export default function Game() {
           announce("봉투가 터졌어요. 바닥을 쓸어 담으세요");
           break;
         case "binEmptied":
-          if (e.burst) {
+          if (e.auto) {
+            toast("money", `청소 담당이 통을 비웠어요 +₩${formatWon(e.reward)}`);
+            announce(`청소 담당이 통을 비웠어요, ${formatWon(e.reward)}원`);
+          } else if (e.burst) {
             toast("warn", "다 치웠어요. 이번 폐지는 수익이 없어요");
             announce("청소 완료. 새 봉투를 끼웠어요");
           } else {
@@ -175,6 +183,29 @@ export default function Game() {
             toast("warn", `테이프를 떼다 서류가 찢어졌어요 (수익 ×${TORN_MULT})`);
             announce("테이프를 떼다 서류가 찢어졌어요. 수익이 줄어요");
           } else if (e.done) announce(`${HAZARDS[e.kind].name} 처리 완료`);
+          break;
+        case "janitorNoBags":
+          toast("warn", "봉투가 없어서 청소 담당이 통을 못 비워요. 시설 탭에서 봉투를 사주세요", 5000);
+          announce("봉투가 없어서 청소 담당이 통을 못 비워요");
+          break;
+        case "orderOffered":
+          announce(`새 의뢰: ${e.order.client}, ${orderTitle(e.order)}`);
+          break;
+        case "orderAccepted":
+          toast("success", `${e.order.client} 의뢰 시작: ${orderTitle(e.order)}`);
+          announce(`의뢰를 받았어요. ${orderTitle(e.order)}, ${formatDuration(e.order.time)} 안에`);
+          break;
+        case "orderDone":
+          toast("money", `의뢰 완료! ${e.order.client} +₩${formatWon(e.order.reward)} · 평판 +${e.order.rep}`, 4000);
+          announce(`의뢰 완료, ${formatWon(e.order.reward)}원, 평판 ${e.order.rep} 올랐어요`);
+          break;
+        case "orderFailed":
+          toast("error", `${e.order.client} 의뢰를 못 끝냈어요 (평판 −${ORDERS.failRep})`);
+          announce(`의뢰 실패. 평판이 ${ORDERS.failRep} 내려갔어요`);
+          break;
+        case "prestige":
+          toast("success", `제${e.certificate.branch}호 파기 증명서 발급! 새 지점에서 수익 ×${branchMult(e.certificate.branch)}`, 6000);
+          announce(`지점 확장 완료. 새 지점에서 다시 시작해요. 영구 수익 ${branchMult(e.certificate.branch)}배`);
           break;
         case "templateUnlocked": {
           const t = TEMPLATES[e.template];
@@ -217,6 +248,15 @@ export default function Game() {
       }
     });
   }, [engine, sound, toast, announce]);
+
+  // 자리를 비운 동안 급지 담당이 번 돈 (불러올 때 한 번만)
+  useEffect(() => {
+    const r = engine.takeOfflineReport();
+    if (!r) return;
+    const msg = `자리를 비운 ${formatDuration(r.seconds)} 동안 급지 담당이 ₩${formatWon(r.reward)} 벌었어요${r.capped ? " (최대 시간까지만)" : ""}`;
+    toast("money", msg, 6000);
+    announce(msg);
+  }, [engine, toast, announce]);
 
   // 페이지를 떠날 때 저장
   useEffect(() => {
@@ -375,6 +415,14 @@ export default function Game() {
             onTreat={(i, page) => engine.treatHazard(selected.id, i, page)}
           />
         )}
+        {!wide && (
+          <OrdersBoard
+            snap={snap}
+            onAccept={(id) => engine.acceptOrder(id)}
+            onDecline={(id) => engine.declineOrder(id)}
+            onAbandon={() => engine.abandonOrder()}
+          />
+        )}
         <ActionBar
           snap={snap}
           onFeed={feed}
@@ -397,6 +445,18 @@ export default function Game() {
             <dd>{snap.totalShredded.toLocaleString("ko-KR")}장</dd>
           </div>
           <div>
+            <dt>평판</dt>
+            <dd>
+              {snap.reputation} (×{snap.bonusMult.toFixed(2)})
+            </dd>
+          </div>
+          {snap.branches > 0 && (
+            <div>
+              <dt>지점</dt>
+              <dd>{snap.branches + 1}호점</dd>
+            </div>
+          )}
+          <div>
             <dt>총 수익</dt>
             <dd>₩{formatWon(snap.totalEarned)}</dd>
           </div>
@@ -417,10 +477,14 @@ export default function Game() {
             <dd>{snap.bags}장</dd>
           </div>
         </dl>
-        <p className="postit">
-          <strong>의뢰 게시판</strong>
-          거래처 의뢰는 사무실이 커지면 이곳에 붙어요.
-        </p>
+        {wide && (
+          <OrdersBoard
+          snap={snap}
+          onAccept={(id) => engine.acceptOrder(id)}
+          onDecline={(id) => engine.declineOrder(id)}
+          onAbandon={() => engine.abandonOrder()}
+        />
+        )}
       </aside>
 
       <UpgradePanel
@@ -432,6 +496,7 @@ export default function Game() {
         onBuy={buy}
         onBuyBags={() => engine.buyBags()}
         onBuyTier={() => engine.buyTier()}
+        onPrestige={() => engine.prestige()}
       />
 
       <div className="sr-only" aria-live="polite" aria-atomic="true">

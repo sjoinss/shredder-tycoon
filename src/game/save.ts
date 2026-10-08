@@ -1,7 +1,9 @@
 import {
   ALBUM,
   BIN,
+  CLIENTS,
   HAZARDS,
+  ORDERS,
   PAGE_DOC,
   PAGE_TAKEN,
   TEMPLATES,
@@ -15,7 +17,7 @@ import {
 } from "./data";
 
 export const SAVE_KEY = "shredder.save";
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface Hazard {
   kind: HazardKind;
@@ -61,6 +63,42 @@ export interface SaveData {
   levels: Record<UpgradeId, number>;
   tray: DocData[];
   nextDocId: number;
+  /** 평판 (의뢰 완료로 오름 → 수익 배율) */
+  reputation: number;
+  orders: { offers: Order[]; active: Order | null; nextId: number };
+  /** 지점 확장 횟수 (영구 수익 배율) */
+  branches: number;
+  certificates: Certificate[];
+  /** 마지막으로 저장한 시각 (오프라인 수익 계산용, ms) */
+  lastSeen: number;
+}
+
+/** 거래처 의뢰: "○○ 서류 N장을 P-x 이상으로 M분 안에" */
+export interface Order {
+  id: number;
+  client: string;
+  /** 이 양식만 셈 (null이면 종이 서류 아무거나) */
+  template: TemplateId | null;
+  count: number;
+  /** 이 티어(0부터) 이상 본체로 갈아야 셈 */
+  minTier: number;
+  /** 제한 시간(초) */
+  time: number;
+  /** 남은 시간(초) — 받은 의뢰만 줄어듦 */
+  left: number;
+  progress: number;
+  reward: number;
+  rep: number;
+}
+
+/** 파기 증명서: 지점을 확장할 때마다 한 장 */
+export interface Certificate {
+  branch: number;
+  /** 발급일 YYYY-MM-DD */
+  date: string;
+  shredded: number;
+  earned: number;
+  tier: number;
 }
 
 export const defaultSave = (): SaveData => ({
@@ -86,9 +124,19 @@ export const defaultSave = (): SaveData => ({
     cutter: 0,
     letterOpener: 0,
     scissors: 0,
+    sorter: 0,
+    autoFeed: 0,
+    janitor: 0,
+    compactor: 0,
+    recycle: 0,
   },
   tray: [],
   nextDocId: 1,
+  reputation: 0,
+  orders: { offers: [], active: null, nextId: 1 },
+  branches: 0,
+  certificates: [],
+  lastSeen: 0,
 });
 
 export type LoadResult = { ok: true; data: SaveData; fresh: boolean } | { ok: false; reason: string };
@@ -100,7 +148,7 @@ const num = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) =>
 function sanitize(raw: unknown): SaveData {
   if (!raw || typeof raw !== "object") throw new Error("형식이 올바르지 않습니다");
   const r = raw as Record<string, unknown>;
-  if (r.version !== 1 && r.version !== 2 && r.version !== 3 && r.version !== SAVE_VERSION)
+  if (typeof r.version !== "number" || r.version < 1 || r.version > SAVE_VERSION || !Number.isInteger(r.version))
     throw new Error(`지원하지 않는 저장 버전입니다 (${String(r.version)})`);
 
   const base = defaultSave();
@@ -118,6 +166,23 @@ function sanitize(raw: unknown): SaveData {
     base.heat = num(r.heat, 0, 100);
     base.overheated = r.overheated === true;
     base.tier = Math.floor(num(r.tier, 0, TIERS.length - 1));
+  }
+  base.reputation = Math.floor(num(r.reputation, 0, 100000));
+  base.branches = Math.floor(num(r.branches, 0, 1000));
+  base.lastSeen = num(r.lastSeen);
+  base.certificates = sanitizeCertificates(r.certificates);
+  const ordersRaw = (r.orders ?? {}) as Record<string, unknown>;
+  const offers = Array.isArray(ordersRaw.offers) ? ordersRaw.offers : [];
+  base.orders = {
+    offers: offers
+      .slice(0, ORDERS.maxOffers)
+      .map(sanitizeOrder)
+      .filter((o): o is Order => o !== null),
+    active: sanitizeOrder(ordersRaw.active),
+    nextId: Math.floor(num(ordersRaw.nextId, 1)),
+  };
+  for (const o of [...base.orders.offers, base.orders.active]) {
+    if (o) base.orders.nextId = Math.max(base.orders.nextId, o.id + 1);
   }
 
   const tray = Array.isArray(r.tray) ? r.tray : [];
@@ -143,6 +208,45 @@ function sanitize(raw: unknown): SaveData {
     base.nextDocId = Math.max(base.nextDocId, id + 1);
   }
   return base;
+}
+
+function sanitizeOrder(raw: unknown): Order | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const template =
+    typeof r.template === "string" && r.template in TEMPLATES && r.template !== "image" ? (r.template as TemplateId) : null;
+  const count = Math.floor(num(r.count, 1, 10000));
+  const time = num(r.time, 1, 24 * 3600);
+  return {
+    id: Math.floor(num(r.id, 1)),
+    // 거래처 이름은 우리 목록에 있는 것만 (화면에 그대로 보이므로)
+    client: typeof r.client === "string" && CLIENTS.includes(r.client) ? r.client : CLIENTS[0],
+    template,
+    count,
+    minTier: Math.floor(num(r.minTier, 0, TIERS.length - 1)),
+    time,
+    left: num(r.left, 0, time),
+    progress: Math.floor(num(r.progress, 0, count)),
+    reward: Math.floor(num(r.reward, 0, 1e12)),
+    rep: Math.floor(num(r.rep, 0, 1000)),
+  };
+}
+
+function sanitizeCertificates(raw: unknown): Certificate[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Certificate[] = [];
+  for (const c of raw.slice(0, 200)) {
+    if (!c || typeof c !== "object") continue;
+    const r = c as Record<string, unknown>;
+    out.push({
+      branch: Math.floor(num(r.branch, 1, 1000)),
+      date: typeof r.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : "",
+      shredded: Math.floor(num(r.shredded)),
+      earned: Math.floor(num(r.earned)),
+      tier: Math.floor(num(r.tier, 0, TIERS.length - 1)),
+    });
+  }
+  return out;
 }
 
 function sanitizeHazards(raw: unknown): Hazard[] {

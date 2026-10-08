@@ -20,3 +20,16 @@ export function capturePointer(el: Element, pointerId: number) {
     /* 캡처 없이도 동작은 이어진다 */
   }
 }
+
+/** 미디어 쿼리 일치 여부 (서버 렌더에서는 false) */
+export function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (fn) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", fn);
+      return () => mq.removeEventListener("change", fn);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
