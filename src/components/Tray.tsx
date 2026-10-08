@@ -11,6 +11,7 @@ import { IconAlert, IconImage } from "./Icons";
 
 const THUMB_H = 76;
 const PAD = 6;
+const THUMB_MAX_W = 76;
 
 /** 오프스크린에 한 번 그려둔 서류 이미지를 축소해서 보여줌 (+ 방해 요소) */
 const DocThumb = memo(function DocThumb({ doc }: { doc: DocView }) {
@@ -21,8 +22,10 @@ const DocThumb = memo(function DocThumb({ doc }: { doc: DocView }) {
     if (!canvas) return;
     const src = getDocCanvas(doc);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const h = THUMB_H;
-    const w = Math.round((src.width / src.height) * h);
+    const aspect = src.width / src.height;
+    // 가로가 긴 명함·카드는 폭에 맞춰 줄인다
+    const h = Math.min(THUMB_H, Math.round(THUMB_MAX_W / aspect));
+    const w = Math.round(aspect * h);
     canvas.width = (w + PAD * 2) * dpr;
     canvas.height = (h + PAD * 2) * dpr;
     canvas.style.width = `${w + PAD * 2}px`;
@@ -31,7 +34,7 @@ const DocThumb = memo(function DocThumb({ doc }: { doc: DocView }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingQuality = "high";
     ctx.fillStyle = "rgba(31,42,51,0.18)";
-    ctx.fillRect(PAD + 2, PAD + 2, w, h);
+    if (doc.template !== "cd") ctx.fillRect(PAD + 2, PAD + 2, w, h);
     ctx.drawImage(src, PAD, PAD, w, h);
     drawHazards(ctx, doc, PAD, PAD, h / TEMPLATES[doc.template].height);
     // 서류 id가 같으면 모양도 같다(시드 기반). 방해 요소가 바뀌면 다시 그림

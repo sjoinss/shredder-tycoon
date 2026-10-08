@@ -19,12 +19,23 @@ export function drawHazards(ctx: CanvasRenderingContext2D, doc: DocData, x: numb
   ctx.scale(scale, scale);
   if (doc.torn) drawTear(ctx, doc.seed, t.width, t.height);
   // 구겨짐 → 클립/스테이플/집게 → 테이프/포스트잇 → 서류를 감싼 것(맨 위) 순서
-  const order = ["crumple", "staple", "clip", "binder", "tape", "postit", "sleeve", "envelope", "album"] as const;
+  const order = ["crumple", "staple", "clip", "binder", "tape", "postit", "chip", "sleeve", "envelope", "album", "case"] as const;
   for (const kind of order) {
     for (const h of doc.hazards) {
       if (h.kind !== kind) continue;
       if (h.left <= 0) {
         if (h.kind === "crumple") drawCrumple(ctx, doc.seed, t.width, t.height, 0.25);
+        // 칩을 잘라 낸 자리: 비스듬히 잘린 홈
+        if (h.kind === "chip" && h.removed) {
+          ctx.fillStyle = "rgba(20,24,28,0.55)";
+          ctx.beginPath();
+          ctx.moveTo(h.x - 9, h.y - 8);
+          ctx.lineTo(h.x + 9, h.y - 6);
+          ctx.lineTo(h.x + 8, h.y + 8);
+          ctx.lineTo(h.x - 8, h.y + 7);
+          ctx.closePath();
+          ctx.fill();
+        }
         continue;
       }
       switch (h.kind) {
@@ -54,6 +65,12 @@ export function drawHazards(ctx: CanvasRenderingContext2D, doc: DocData, x: numb
           break;
         case "album":
           drawAlbumCover(ctx, h, t.width, t.height);
+          break;
+        case "chip":
+          drawChip(ctx, h);
+          break;
+        case "case":
+          drawCdCase(ctx, t.width, t.height);
           break;
       }
     }
@@ -460,5 +477,62 @@ export function drawJamCrush(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
+}
+
+/** IC 칩: 금색 접점 (x, y = 중심) */
+function drawChip(ctx: CanvasRenderingContext2D, h: Hazard) {
+  ctx.save();
+  ctx.translate(h.x, h.y);
+  const g = ctx.createLinearGradient(-7, -5.5, 7, 5.5);
+  g.addColorStop(0, "#e8cf7a");
+  g.addColorStop(1, "#b48c32");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-7, -5.5, 14, 11, 1.6);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(90,60,10,0.6)";
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(-2.5, 0);
+  ctx.moveTo(2.5, 0);
+  ctx.lineTo(7, 0);
+  ctx.moveTo(-2.5, -5.5);
+  ctx.lineTo(-2.5, 5.5);
+  ctx.moveTo(2.5, -5.5);
+  ctx.lineTo(2.5, 5.5);
+  ctx.moveTo(-2.5, -2.5);
+  ctx.lineTo(2.5, -2.5);
+  ctx.moveTo(-2.5, 2.5);
+  ctx.lineTo(2.5, 2.5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** CD 케이스: 투명 플라스틱 사각 + 경첩 + 반사 */
+function drawCdCase(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const m = 5;
+  ctx.save();
+  ctx.fillStyle = "rgba(31,42,51,0.2)";
+  ctx.fillRect(-m + 3, -m + 3, w + m * 2, h + m * 2);
+  ctx.fillStyle = "rgba(200,215,228,0.38)";
+  ctx.fillRect(-m, -m, w + m * 2, h + m * 2);
+  ctx.strokeStyle = "rgba(70,90,110,0.7)";
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(-m, -m, w + m * 2, h + m * 2);
+  // 왼쪽 경첩
+  ctx.fillStyle = "rgba(40,50,60,0.55)";
+  ctx.fillRect(-m, -m, 9, h + m * 2);
+  // 반사
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.beginPath();
+  ctx.moveTo(w * 0.25, -m);
+  ctx.lineTo(w * 0.5, -m);
+  ctx.lineTo(4, h * 0.5);
+  ctx.lineTo(4, h * 0.25);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }

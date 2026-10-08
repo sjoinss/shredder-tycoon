@@ -201,7 +201,16 @@ export const IconLetterOpener = (p: IconProps) => (
   </Svg>
 );
 
+export const IconScissors = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="6" cy="17.5" r="2.8" />
+    <circle cx="6" cy="6.5" r="2.8" />
+    <path d="M8.4 8l11.6 9M8.4 16L20 7" />
+  </Svg>
+);
+
 export const UPGRADE_ICONS = {
+  scissors: IconScissors,
   stapleRemover: IconStapleRemover,
   cutter: IconCutter,
   letterOpener: IconLetterOpener,

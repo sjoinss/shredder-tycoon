@@ -5,6 +5,7 @@ import {
   PAGE_DOC,
   PAGE_TAKEN,
   TEMPLATES,
+  TIERS,
   RARITIES,
   UPGRADES,
   type HazardKind,
@@ -14,7 +15,7 @@ import {
 } from "./data";
 
 export const SAVE_KEY = "shredder.save";
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface Hazard {
   kind: HazardKind;
@@ -55,6 +56,8 @@ export interface SaveData {
   /** 열 0..100 */
   heat: number;
   overheated: boolean;
+  /** 파쇄기 본체 티어 (0 = 가정용) */
+  tier: number;
   levels: Record<UpgradeId, number>;
   tray: DocData[];
   nextDocId: number;
@@ -69,6 +72,7 @@ export const defaultSave = (): SaveData => ({
   bags: BIN.startBags,
   heat: 0,
   overheated: false,
+  tier: 0,
   levels: {
     speed: 0,
     cooldown: 0,
@@ -81,6 +85,7 @@ export const defaultSave = (): SaveData => ({
     stapleRemover: 0,
     cutter: 0,
     letterOpener: 0,
+    scissors: 0,
   },
   tray: [],
   nextDocId: 1,
@@ -95,7 +100,7 @@ const num = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) =>
 function sanitize(raw: unknown): SaveData {
   if (!raw || typeof raw !== "object") throw new Error("형식이 올바르지 않습니다");
   const r = raw as Record<string, unknown>;
-  if (r.version !== 1 && r.version !== 2 && r.version !== SAVE_VERSION)
+  if (r.version !== 1 && r.version !== 2 && r.version !== 3 && r.version !== SAVE_VERSION)
     throw new Error(`지원하지 않는 저장 버전입니다 (${String(r.version)})`);
 
   const base = defaultSave();
@@ -112,6 +117,7 @@ function sanitize(raw: unknown): SaveData {
     base.bags = Math.floor(num(r.bags, 0, BIN.maxBags));
     base.heat = num(r.heat, 0, 100);
     base.overheated = r.overheated === true;
+    base.tier = Math.floor(num(r.tier, 0, TIERS.length - 1));
   }
 
   const tray = Array.isArray(r.tray) ? r.tray : [];
@@ -119,6 +125,8 @@ function sanitize(raw: unknown): SaveData {
     if (!d || typeof d !== "object") continue;
     const doc = d as Record<string, unknown>;
     if (typeof doc.template !== "string" || !(doc.template in TEMPLATES) || doc.template === "image") continue;
+    // 지금 파쇄기로는 넣을 수 없는 물건 (전용 슬롯 없음)
+    if ((TEMPLATES[doc.template as TemplateId].minTier ?? 0) > base.tier) continue;
     const rarity = typeof doc.rarity === "string" && doc.rarity in RARITIES ? (doc.rarity as RarityId) : null;
     const id = Math.floor(num(doc.id, 1));
     const out: DocData = {

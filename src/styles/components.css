@@ -1538,3 +1538,8 @@ kbd {
   margin-top: var(--space-sm);
   font-size: var(--font-size-xs);
 }
+.ledger__perks {
+  display: block;
+  color: var(--color-muted);
+  font-weight: 400;
+}

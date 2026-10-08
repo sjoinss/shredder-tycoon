@@ -58,8 +58,16 @@ function drawDoc(doc: DocData): HTMLCanvasElement {
   ctx.scale(DOC_SCALE, DOC_SCALE);
   const g = new Pen(ctx, rng, t.width, t.height);
 
+  // 명함·카드·CD는 종이 서류와 그림이 완전히 다르다
+  if (doc.template === "bizcard" || doc.template === "card" || doc.template === "cd") {
+    if (doc.template === "bizcard") drawBizcard(ctx, rng, t.width, t.height);
+    else if (doc.template === "card") drawCard(ctx, rng, t.width, t.height);
+    else drawCd(ctx, rng, t.width);
+    return canvas;
+  }
+
   // 종이 바탕
-  const paper = doc.template === "receipt" ? (rng.chance(0.7) ? "#f8f7f2" : PAPER_COLORS[1]) : rng.pick(PAPER_COLORS);
+  const paper =doc.template === "receipt" ? (rng.chance(0.7) ? "#f8f7f2" : PAPER_COLORS[1]) : rng.pick(PAPER_COLORS);
   ctx.fillStyle = paper;
   if (doc.template === "receipt") g.receiptShape();
   else ctx.fillRect(0, 0, t.width, t.height);
@@ -496,4 +504,123 @@ class Pen {
     ctx.lineWidth = 0.8;
     ctx.strokeRect(9, 9, w - 18, h - 18);
   }
+}
+
+/** 명함: 두꺼운 흰 종이 + 로고 + 이름 막대 + 연락처 줄 */
+function drawBizcard(ctx: CanvasRenderingContext2D, rng: Rng, w: number, h: number) {
+  const accent = rng.pick(ACCENTS);
+  ctx.fillStyle = rng.pick(["#fbfaf5", "#f4f1e8", "#eef1f3"]);
+  ctx.fillRect(0, 0, w, h);
+  // 왼쪽 색 띠 또는 아래 띠
+  ctx.fillStyle = accent;
+  if (rng.chance(0.5)) ctx.fillRect(0, 0, 5, h);
+  else ctx.fillRect(0, h - 5, w, 5);
+  // 로고 (도형 조합)
+  ctx.beginPath();
+  ctx.arc(16, 15, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(24, 10, 18, 3);
+  ctx.fillStyle = INK_SOFT;
+  ctx.fillRect(24, 15, 12, 2);
+  // 이름 (굵은 막대) + 직함
+  ctx.fillStyle = INK;
+  ctx.fillRect(w * 0.42, 14, rng.range(22, 32), 4.5);
+  ctx.fillStyle = INK_FAINT;
+  ctx.fillRect(w * 0.42, 21, rng.range(14, 22), 2);
+  // 연락처 줄
+  ctx.fillStyle = INK_SOFT;
+  for (let i = 0; i < 3; i++) ctx.fillRect(w * 0.42, 30 + i * 4.5, rng.range(24, 40), 1.6);
+}
+
+const CARD_COLORS = [
+  ["#1d3b6e", "#3c6fb8"],
+  ["#2c2f33", "#5a6068"],
+  ["#7a1f2b", "#c2414f"],
+  ["#1f5c46", "#3f9b77"],
+  ["#c9a043", "#ecd28a"],
+];
+
+/** 플라스틱 카드: 그라데이션 + IC 칩 자리 + 번호 막대 (실제 번호처럼 보이지 않게 막대로만) */
+function drawCard(ctx: CanvasRenderingContext2D, rng: Rng, w: number, h: number) {
+  const [a, b] = rng.pick(CARD_COLORS);
+  const r = 3.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, h, r);
+  ctx.clip();
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, a);
+  grad.addColorStop(1, b);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  // 무늬 원
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.beginPath();
+  ctx.arc(w * 0.85, h * 0.1, h * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  // 칩 자리 (칩 자체는 방해 요소로 덧그림, 여기엔 홈만)
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(11, 18, 14, 11);
+  // 번호 막대 4묶음
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  for (let g = 0; g < 4; g++) ctx.fillRect(10 + g * 17, 36, 13, 2.6);
+  // 이름 + 브랜드 원
+  ctx.fillStyle = "rgba(255,255,255,0.6)";
+  ctx.fillRect(10, 44, rng.range(20, 30), 1.8);
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.beginPath();
+  ctx.arc(w - 16, h - 10, 4.5, 0, Math.PI * 2);
+  ctx.arc(w - 10, h - 10, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** CD: 은색 원판 + 무지개 반사 + 가운데 구멍 + 손글씨 라벨 */
+function drawCd(ctx: CanvasRenderingContext2D, rng: Rng, size: number) {
+  const c = size / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(c, c, c - 0.5, 0, Math.PI * 2);
+  ctx.arc(c, c, 7.5, 0, Math.PI * 2, true);
+  ctx.clip("evenodd");
+  ctx.fillStyle = "#d7dbe0";
+  ctx.fillRect(0, 0, size, size);
+  // 무지개 반사 (원뿔 그라데이션)
+  const cone = ctx.createConicGradient(rng.range(0, Math.PI * 2), c, c);
+  const stops = ["rgba(255,120,160,0.35)", "rgba(255,230,120,0.35)", "rgba(120,230,180,0.35)", "rgba(120,170,255,0.35)", "rgba(255,120,160,0.35)"];
+  stops.forEach((s, i) => cone.addColorStop(i / (stops.length - 1), s));
+  ctx.fillStyle = cone;
+  ctx.fillRect(0, 0, size, size);
+  // 라벨 면 (흰 인쇄면이 있는 CD)
+  if (rng.chance(0.5)) {
+    ctx.fillStyle = "rgba(250,249,244,0.92)";
+    ctx.beginPath();
+    ctx.arc(c, c, c - 6, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.arc(c, c, 22, Math.PI * 1.95, Math.PI * 1.05, true);
+    ctx.fill();
+  }
+  // 매직 손글씨
+  ctx.strokeStyle = rng.pick(["#1d1d1d", "#2b4c9b", "#b8322a"]);
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  let x = c - 26;
+  const y = c - 34;
+  ctx.moveTo(x, y);
+  while (x < c + 26) {
+    x += 3;
+    ctx.lineTo(x, y + rng.range(-2.5, 2.5));
+  }
+  ctx.stroke();
+  // 안쪽 투명 링
+  ctx.restore();
+  ctx.strokeStyle = "rgba(90,100,110,0.45)";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(c, c, c - 0.5, 0, Math.PI * 2);
+  ctx.moveTo(c + 18, c);
+  ctx.arc(c, c, 18, 0, Math.PI * 2);
+  ctx.moveTo(c + 7.5, c);
+  ctx.arc(c, c, 7.5, 0, Math.PI * 2);
+  ctx.stroke();
 }

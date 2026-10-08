@@ -1,7 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HAZARDS, RARITIES, TABS, TORN_MULT, UPGRADES, shredTime, type UpgradeId, type UpgradeTab } from "@/game/data";
+import {
+  CUT_GRADES,
+  HAZARDS,
+  RARITIES,
+  TABS,
+  TEMPLATES,
+  TIERS,
+  TORN_MULT,
+  UPGRADES,
+  shredTime,
+  type UpgradeId,
+  type UpgradeTab,
+} from "@/game/data";
 import { SoundBoard } from "@/game/audio";
 import { GameEngine, type FeedBlock, type GameEvent } from "@/game/engine";
 import { formatWon } from "@/game/format";
@@ -164,6 +176,20 @@ export default function Game() {
             announce("테이프를 떼다 서류가 찢어졌어요. 수익이 줄어요");
           } else if (e.done) announce(`${HAZARDS[e.kind].name} 처리 완료`);
           break;
+        case "templateUnlocked": {
+          const t = TEMPLATES[e.template];
+          const msg = `새 서류: ${t.name} — 두꺼워서 1장이 투입 용량 ${t.load ?? 1}장 분이에요. 용량을 넘기면 잘 걸려요.`;
+          toast("warn", msg, 6000);
+          announce(msg);
+          break;
+        }
+        case "tierUp": {
+          const t = TIERS[e.tier];
+          const slot = t.slot ? " 카드·CD 전용 슬롯이 생겼어요!" : "";
+          toast("success", `${t.name} 파쇄기로 교체! (${CUT_GRADES[t.grade].label})${slot}`, 5000);
+          announce(`${t.name} 파쇄기로 교체했어요. 수익 ${t.mult}배.${slot}`);
+          break;
+        }
         case "hazardUnlocked":
           toast("warn", `새 방해 요소: ${HAZARDS[e.kind].name} — ${HAZARDS[e.kind].tip}`, 6000);
           announce(`새 방해 요소 등장: ${HAZARDS[e.kind].name}. ${HAZARDS[e.kind].tip}`);
@@ -376,7 +402,7 @@ export default function Game() {
           </div>
           <div>
             <dt>컷 등급</dt>
-            <dd>P-1 스트립</dd>
+            <dd>{snap.tier.grade}</dd>
           </div>
           <div>
             <dt>투입 용량</dt>
@@ -405,6 +431,7 @@ export default function Game() {
         onSheet={setSheet}
         onBuy={buy}
         onBuyBags={() => engine.buyBags()}
+        onBuyTier={() => engine.buyTier()}
       />
 
       <div className="sr-only" aria-live="polite" aria-atomic="true">

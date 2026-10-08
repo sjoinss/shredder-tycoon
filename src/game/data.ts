@@ -1,6 +1,6 @@
 // 서류/업그레이드/컷 등급 정의 테이블. 수치는 모두 초기값이며 플레이 테스트로 조정한다.
 
-export type TemplateId = "official" | "ledger" | "receipt" | "memo" | "image";
+export type TemplateId = "official" | "ledger" | "receipt" | "memo" | "image" | "bizcard" | "card" | "cd";
 export type RarityId = "gold" | "urgent";
 export type UpgradeId =
   | "speed"
@@ -13,9 +13,10 @@ export type UpgradeId =
   | "bin"
   | "stapleRemover"
   | "cutter"
-  | "letterOpener";
+  | "letterOpener"
+  | "scissors";
 export type UpgradeTab = "shredder" | "tools" | "automation" | "facility";
-export type CutGradeId = "P-1";
+export type CutGradeId = "P-1" | "P-3" | "P-4" | "P-5";
 
 export interface TemplateDef {
   name: string;
@@ -28,6 +29,14 @@ export interface TemplateDef {
   weight: number;
   /** 두께 (열 발생량 계수) */
   thickness: number;
+  /** 투입 용량을 몇 장 분 차지하는지 (명함은 두꺼워서 3장 분). 없으면 1 */
+  load?: number;
+  /** 전용 슬롯으로만 넣는 것 (한 번에 하나씩) */
+  slot?: boolean;
+  /** 누적 파쇄 장수가 이만큼 되면 도착하기 시작 */
+  unlockAt?: number;
+  /** 이 티어(0부터) 이상 파쇄기에서만 도착 */
+  minTier?: number;
 }
 
 export const TEMPLATES: Record<TemplateId, TemplateDef> = {
@@ -37,6 +46,9 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   memo: { name: "메모", baseValue: 8, width: 148, height: 210, weight: 2, thickness: 0.8 },
   // 사용자가 올린 이미지로 만든 종이: 무작위로는 나오지 않음, 일반 공문과 같은 수익
   image: { name: "내 이미지", baseValue: 12, width: 210, height: 297, weight: 0, thickness: 1 },
+  bizcard: { name: "명함", baseValue: 14, width: 90, height: 50, weight: 1.5, thickness: 2, load: 3, unlockAt: 320 },
+  card: { name: "카드", baseValue: 45, width: 86, height: 54, weight: 1, thickness: 3, slot: true, minTier: 3 },
+  cd: { name: "CD", baseValue: 35, width: 120, height: 120, weight: 1, thickness: 3.5, slot: true, minTier: 3 },
 };
 
 /** 무작위로 도착하는 양식 */
@@ -52,7 +64,9 @@ export type HazardKind =
   | "postit"
   | "tape"
   | "envelope"
-  | "album";
+  | "album"
+  | "chip"
+  | "case";
 
 export interface HazardDef {
   name: string;
@@ -67,6 +81,10 @@ export interface HazardDef {
   /** 누적 파쇄 장수가 이만큼 되면 등장 */
   unlockAt: number;
   tip: string;
+  /** 이 양식에만 붙는다 (전용 슬롯 물건 등). 없으면 종이 서류 전반 */
+  only?: TemplateId[];
+  /** 처리하려면 필요한 도구 */
+  tool?: UpgradeId;
 }
 
 export const HAZARDS: Record<HazardKind, HazardDef> = {
@@ -153,10 +171,31 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     unlockAt: 260,
     tip: "앨범 파일은 좌우로 넘기며 서류가 든 페이지만 꺼내세요. 빈 포켓은 건너뛰어요.",
   },
+  chip: {
+    name: "IC 칩",
+    action: "가위로 자르기",
+    taps: 1,
+    jam: 0.15,
+    heavy: false,
+    unlockAt: 0,
+    tip: "칩 카드는 가위로 칩을 잘라 내면 보너스. 금속 칩은 칼날에 걸리기도 해요.",
+    only: ["card"],
+    tool: "scissors",
+  },
+  case: {
+    name: "CD 케이스",
+    action: "열고 꺼내기",
+    taps: 1,
+    jam: 0.9,
+    heavy: true,
+    unlockAt: 0,
+    tip: "CD는 플라스틱 케이스에서 꺼내서 넣어요. 케이스째 넣으면 단단히 걸려요.",
+    only: ["cd"],
+  },
 };
 
 /** 서류를 감싸는 방해 요소: 먼저 꺼내야 안쪽을 만질 수 있다 */
-export const CONTAINER_KINDS: readonly HazardKind[] = ["sleeve", "envelope", "album"];
+export const CONTAINER_KINDS: readonly HazardKind[] = ["sleeve", "envelope", "album", "case"];
 /** 봉투: 남은 탭이 이 값이면 열린 상태 (꺼내기만 남음) */
 export const ENVELOPE_OPENED = 1;
 /** 앨범 파일 페이지 구성 */
@@ -210,11 +249,81 @@ export interface CutGradeDef {
   heat: number;
   /** 폐지 단가(원/장) — 스트립 > 크로스컷 > 마이크로컷 */
   pulpPrice: number;
+  /** 같은 통에 담기는 양 배율 (잘게 자를수록 촘촘히 쌓인다) */
+  pack: number;
 }
 
 export const CUT_GRADES: Record<CutGradeId, CutGradeDef> = {
-  "P-1": { label: "P-1 스트립", mult: 1, stripWidth: 7, segment: [38, 64], heat: 1, pulpPrice: 1.2 },
+  "P-1": { label: "P-1 스트립", mult: 1, stripWidth: 7, segment: [38, 64], heat: 1, pulpPrice: 1.2, pack: 1 },
+  "P-3": { label: "P-3 크로스컷", mult: 1, stripWidth: 5, segment: [36, 46], heat: 1, pulpPrice: 1, pack: 1.3 },
+  "P-4": { label: "P-4 크로스컷", mult: 1, stripWidth: 4, segment: [24, 32], heat: 1, pulpPrice: 0.9, pack: 1.5 },
+  "P-5": { label: "P-5 마이크로컷", mult: 1, stripWidth: 2, segment: [9, 13], heat: 1, pulpPrice: 0.6, pack: 1.8 },
 };
+
+// ---------- 파쇄기 본체 (티어) ----------
+export interface TierDef {
+  name: string;
+  grade: CutGradeId;
+  /** 교체 비용 (T1은 처음부터 보유) */
+  cost: number;
+  /** 기본 투입 용량 (용량 업그레이드가 여기에 더해짐) */
+  capacity: number;
+  /** 수익 배율 */
+  mult: number;
+  /** 열 발생 배율 */
+  heat: number;
+  /** 파쇄 시간 배율 */
+  time: number;
+  /** 처리 안 한 방해 요소의 잼 확률 배율 (기계가 갈아버릴 수 있는 것) */
+  handles: Partial<Record<HazardKind, number>>;
+  /** 카드/CD 전용 슬롯 */
+  slot: boolean;
+  /** 교체 화면에 보이는 특징 */
+  perks: string;
+}
+
+export const TIERS: TierDef[] = [
+  { name: "가정용 스트립", grade: "P-1", cost: 0, capacity: 1, mult: 1, heat: 1, time: 1, handles: {}, slot: false, perks: "클립·스테이플을 못 갈아요" },
+  {
+    name: "소형 크로스컷",
+    grade: "P-3",
+    cost: 1500,
+    capacity: 2,
+    mult: 1.6,
+    heat: 1.15,
+    time: 1.1,
+    handles: { clip: 0, staple: 0.5 },
+    slot: false,
+    perks: "클립 OK, 스테이플은 반쯤",
+  },
+  {
+    name: "사무용",
+    grade: "P-4",
+    cost: 12000,
+    capacity: 4,
+    mult: 2.4,
+    heat: 1.3,
+    time: 1.15,
+    handles: { clip: 0, staple: 0, binder: 0.5 },
+    slot: false,
+    perks: "클립·스테이플 OK, 명함도 거뜬",
+  },
+  {
+    name: "마이크로컷",
+    grade: "P-5",
+    cost: 60000,
+    capacity: 3,
+    mult: 3.6,
+    heat: 1.6,
+    time: 1.3,
+    handles: { clip: 0, staple: 0, binder: 0.5 },
+    slot: true,
+    perks: "카드·CD 전용 슬롯, 열이 많이 나요",
+  },
+];
+
+/** 투입 용량을 넘긴 1장 분마다 붙는 잼 확률 */
+export const OVERLOAD_JAM = 0.2;
 
 /** 실제 복사 양식지 느낌의 종이 색 (테마와 무관하게 고정) */
 export const PAPER_COLORS = ["#fbfaf5", "#f7f0dd", "#e7eef5", "#f6e7e8", "#e5e3dc"];
@@ -235,8 +344,11 @@ export const shredTime = (lv: number) => 2.4 * Math.pow(0.88, lv);
 export const cooldownTime = (lv: number) => 1.2 * Math.pow(0.84, lv);
 export const arrivalInterval = (lv: number) => 3.5 * Math.pow(0.87, lv);
 export const traySlots = (lv: number) => 4 + Math.floor(lv / 2);
-const CAPACITY_STEPS = [1, 2, 3, 4, 5, 6, 8];
-export const feedCapacity = (lv: number) => CAPACITY_STEPS[Math.min(lv, CAPACITY_STEPS.length - 1)];
+/** 용량 업그레이드가 본체 기본 용량에 더하는 장수 */
+const CAPACITY_STEPS = [0, 1, 2, 3, 4, 5, 7];
+export const capacityBonus = (lv: number) => CAPACITY_STEPS[Math.min(lv, CAPACITY_STEPS.length - 1)];
+export const feedCapacity = (lv: number, tier = 0) =>
+  TIERS[tier].capacity + capacityBonus(lv);
 export const heatMult = (lv: number) => Math.pow(0.9, lv);
 /** 초당 식는 양(%) */
 export const coolRate = (lv: number) => 2 * (1 + 0.15 * lv);
@@ -308,11 +420,11 @@ export const UPGRADES: UpgradeDef[] = [
     id: "capacity",
     tab: "shredder",
     name: "투입 용량",
-    desc: "한 번에 넣는 장수 (서류 여러 장을 묶어 투입)",
+    desc: "본체 기본 용량에 더해 한 번에 넣는 장수 (서류 여러 장을 묶어 투입)",
     baseCost: 120,
     growth: 1.5,
     maxLevel: 6,
-    effect: (lv) => `${feedCapacity(lv)}장`,
+    effect: (lv) => `본체 +${capacityBonus(lv)}장`,
   },
   {
     id: "motor",
@@ -394,6 +506,16 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 1,
     effect: (lv) => (lv > 0 ? "한 번에 열기" : "손으로 3번 뜯기"),
   },
+  {
+    id: "scissors",
+    tab: "tools",
+    name: "가위",
+    desc: "칩 카드의 IC 칩을 잘라 냄 (보너스)",
+    baseCost: 2500,
+    growth: 1,
+    maxLevel: 1,
+    effect: (lv) => (lv > 0 ? "칩 자르기 가능" : "없음"),
+  },
 ];
 
 export const upgradeCost = (def: UpgradeDef, level: number) =>
@@ -401,7 +523,7 @@ export const upgradeCost = (def: UpgradeDef, level: number) =>
 
 export const TABS: { id: UpgradeTab; label: string; lockedNote?: string; note?: string }[] = [
   { id: "shredder", label: "파쇄기" },
-  { id: "tools", label: "도구", note: "가위와 라벨 리무버는 코팅 서류와 카드가 들어오면 입고돼요." },
+  { id: "tools", label: "도구", note: "라벨 리무버는 코팅 서류가 들어오면 입고돼요." },
   { id: "automation", label: "자동화", lockedNote: "알바생과 자동 급지 장치는 사무실이 커지면 들어와요." },
   { id: "facility", label: "시설" },
 ];

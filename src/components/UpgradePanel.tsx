@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { BIN, TABS, UPGRADES, type UpgradeId, type UpgradeTab } from "@/game/data";
 import type { Snapshot } from "@/game/engine";
 import { formatWon } from "@/game/format";
-import { IconBag, IconChevronUp, IconLock, UPGRADE_ICONS } from "./Icons";
+import { IconBag, IconChevronUp, IconLock, IconShred, UPGRADE_ICONS } from "./Icons";
 
 export type SheetState = "collapsed" | "half" | "full";
 const NEXT_SHEET: Record<SheetState, SheetState> = { collapsed: "half", half: "full", full: "collapsed" };
@@ -17,9 +17,10 @@ interface Props {
   onSheet: (s: SheetState) => void;
   onBuy: (id: UpgradeId) => void;
   onBuyBags: () => void;
+  onBuyTier: () => void;
 }
 
-export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, onBuyBags }: Props) {
+export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, onBuyBags, onBuyTier }: Props) {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const drag = useRef<{ y: number; moved: boolean } | null>(null);
 
@@ -116,6 +117,7 @@ export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, 
             </p>
           ) : (
             <ul className="ledger">
+              {tab === "shredder" && <TierRow snap={snap} onBuyTier={onBuyTier} />}
               {items.map((def) => {
                 const u = snap.upgrades[def.id];
                 const Icon = UPGRADE_ICONS[def.id];
@@ -171,6 +173,58 @@ export default function UpgradePanel({ snap, tab, sheet, onTab, onSheet, onBuy, 
         </div>
       </div>
     </section>
+  );
+}
+
+/** 파쇄기 본체 교체 (티어): 컷 등급·수익 배율·기본 용량이 함께 바뀌는 큰 구매 */
+function TierRow({ snap, onBuyTier }: { snap: Snapshot; onBuyTier: () => void }) {
+  const cur = snap.tier;
+  const next = snap.nextTier;
+  const shortBy = next ? Math.max(0, next.cost - snap.money) : 0;
+  return (
+    <li className="ledger__row ledger__row--tier">
+      <span className="ledger__icon">
+        <IconShred />
+      </span>
+      <div className="ledger__main">
+        <h3 className="ledger__name">
+          본체 교체 <span className="ledger__lv">T{cur.index + 1}</span>
+        </h3>
+        <p className="ledger__desc">
+          지금: {cur.name} · {cur.grade}
+        </p>
+        {next ? (
+          <p className="ledger__effect">
+            <span aria-hidden="true">→</span>
+            <span className="sr-only">다음:</span> <strong>{next.name}</strong> ({next.grade}) · 수익 ×{next.mult} · 기본{" "}
+            {next.capacity}장 · 열 ×{next.heat}
+            <span className="ledger__perks">{next.perks}</span>
+          </p>
+        ) : (
+          <p className="ledger__effect">지금 들일 수 있는 가장 좋은 본체예요. 보안용·산업용은 사무실이 커지면 들어와요.</p>
+        )}
+      </div>
+      <button
+        type="button"
+        className="buy-btn"
+        aria-disabled={!next?.affordable}
+        onClick={() => next?.affordable && onBuyTier()}
+        aria-label={
+          next
+            ? `${next.name}로 본체 교체, ₩${formatWon(next.cost)}${next.affordable ? "" : `, ₩${formatWon(shortBy)} 부족`}`
+            : "본체 교체 최대"
+        }
+      >
+        {next ? (
+          <>
+            <span className="buy-btn__cost">₩{formatWon(next.cost)}</span>
+            <span className="buy-btn__note">{next.affordable ? "교체" : `₩${formatWon(shortBy)} 부족`}</span>
+          </>
+        ) : (
+          <span className="buy-btn__cost">최대</span>
+        )}
+      </button>
+    </li>
   );
 }
 

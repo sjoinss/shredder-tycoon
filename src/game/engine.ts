@@ -10,12 +10,14 @@ import {
   HAZARD_KINDS,
   HEAT,
   JAM,
+  OVERLOAD_JAM,
   PAGE_DOC,
   PAGE_EMPTY,
   PAGE_TAKEN,
   RARITIES,
   TEMPLATES,
   TEMPLATE_IDS,
+  TIERS,
   TORN_MULT,
   UPGRADES,
   arrivalInterval,
@@ -68,6 +70,8 @@ export type GameEvent =
   | { type: "jamCleared"; lost: boolean; docs: DocData[] }
   | { type: "hazardTreated"; docId: number; kind: HazardKind; done: boolean; torn?: boolean }
   | { type: "hazardUnlocked"; kind: HazardKind }
+  | { type: "templateUnlocked"; template: TemplateId }
+  | { type: "tierUp"; tier: number }
   | { type: "imageAdded"; doc: DocData }
   | { type: "actionFailed"; reason: string }
   | { type: "saveFailed" }
@@ -82,6 +86,10 @@ export interface DocView extends DocData {
   /** 이대로 넣었을 때 잼 확률 */
   jamRisk: number;
   templateName: string;
+  /** 투입 용량을 차지하는 장수 */
+  load: number;
+  /** 전용 슬롯으로 넣는 물건 */
+  slot: boolean;
   rarityLabel: string | null;
 }
 
@@ -92,6 +100,31 @@ export interface JamView {
   reverse: number;
   pulled: number;
 }
+
+export interface TierView {
+  index: number;
+  name: string;
+  grade: string;
+  mult: number;
+  capacity: number;
+  heat: number;
+  slot: boolean;
+  perks: string;
+}
+
+const tierView = (i: number): TierView => {
+  const t = TIERS[i];
+  return {
+    index: i,
+    name: t.name,
+    grade: CUT_GRADES[t.grade].label,
+    mult: t.mult,
+    capacity: t.capacity,
+    heat: t.heat,
+    slot: t.slot,
+    perks: t.perks,
+  };
+};
 
 export interface UpgradeView {
   id: UpgradeId;
@@ -143,6 +176,9 @@ export interface Snapshot {
   nextHazard: { kind: HazardKind; at: number } | null;
   /** 도구 레벨 (작업대 동작 안내에 사용) */
   tools: ToolLevels;
+  /** 파쇄기 본체 */
+  tier: TierView;
+  nextTier: (TierView & { cost: number; affordable: boolean }) | null;
   upgrades: Record<UpgradeId, UpgradeView>;
   affordableCount: number;
   loadError: string | null;
@@ -153,6 +189,8 @@ const INCOME_WINDOW = 30;
 const SAVE_INTERVAL = 5;
 const EMIT_INTERVAL = 0.1;
 const REPLACE_TIME = 0.8;
+/** 카드/CD 한 개 파쇄 시간 (기본 한 장 시간의 배수) */
+const SLOT_TIME = 2.2;
 const A4_AREA = 210 * 297;
 
 const pendingHazards = (d: DocData) => d.hazards.filter((h) => h.left > 0);
@@ -161,23 +199,30 @@ const removedHazards = (d: DocData) => d.hazards.filter((h) => h.removed).length
 /** 묶음 장수 (앨범 파일 서류는 여러 장) */
 export const docSheets = (d: DocData) => d.sheets ?? 1;
 
-const baseValue = (d: DocData, grade: CutGradeId, treated: number) =>
+/** 투입 용량을 차지하는 장수 (명함은 1장이 3장 분) */
+export const docLoad = (d: DocData) => docSheets(d) * (TEMPLATES[d.template].load ?? 1);
+/** 전용 슬롯으로 넣는 물건 (카드/CD) */
+export const isSlotDoc = (d: DocData) => !!TEMPLATES[d.template].slot;
+
+const baseValue = (d: DocData, tier: number, treated: number) =>
   Math.round(
     TEMPLATES[d.template].baseValue *
       docSheets(d) *
       (d.rarity ? RARITIES[d.rarity].mult : 1) *
-      CUT_GRADES[grade].mult *
+      TIERS[tier].mult *
+      CUT_GRADES[TIERS[tier].grade].mult *
       (d.torn ? TORN_MULT : 1) *
       (1 + HAZARD_BONUS * treated),
   );
 
 /** 수익: 직접 처리한 방해 요소 하나당 +20% */
-export const docValue = (d: DocData, grade: CutGradeId = "P-1") => baseValue(d, grade, removedHazards(d));
+export const docValue = (d: DocData, tier = 0) => baseValue(d, tier, removedHazards(d));
 
 export interface ToolLevels {
   stapleRemover: number;
   cutter: number;
   letterOpener: number;
+  scissors: number;
 }
 
 /** 방해 요소를 다 처리하는 데 남은 동작 수 (도구 레벨 반영) */
@@ -218,14 +263,22 @@ function makeAlbumPages(rng: Rng) {
   return pages;
 }
 
-/** 처리 안 한 방해 요소가 있을 때 이대로 넣으면 걸릴 확률 */
-export function jamChance(d: DocData) {
+/** 처리 안 한 방해 요소가 있을 때 이대로 넣으면 걸릴 확률 (좋은 파쇄기는 클립·스테이플을 그냥 갈아버림) */
+export function jamChance(d: DocData, tier = 0) {
+  const handles = TIERS[tier].handles;
   let safe = 1;
-  for (const h of pendingHazards(d)) safe *= 1 - HAZARDS[h.kind].jam;
+  for (const h of pendingHazards(d)) safe *= 1 - HAZARDS[h.kind].jam * (handles[h.kind] ?? 1);
   return 1 - safe;
 }
 
-const batchJamChance = (docs: DocData[]) => 1 - docs.reduce((s, d) => s * (1 - jamChance(d)), 1);
+/** 용량을 넘겨 억지로 넣을 때의 잼 확률 */
+const overloadChance = (load: number, cap: number) => Math.min(0.9, Math.max(0, load - cap) * OVERLOAD_JAM);
+
+const batchJamChance = (docs: DocData[], tier: number, cap: number) => {
+  const load = docs.some(isSlotDoc) ? 0 : docs.reduce((s, d) => s + docLoad(d), 0);
+  const safe = docs.reduce((s, d) => s * (1 - jamChance(d, tier)), 1) * (1 - overloadChance(load, cap));
+  return 1 - safe;
+};
 
 const docArea = (d: DocData) => (docSheets(d) * TEMPLATES[d.template].width * TEMPLATES[d.template].height) / A4_AREA;
 
@@ -248,7 +301,6 @@ export class GameEngine {
   reversing = false;
   selectedId: number | null = null;
   arrivalLeft = 0;
-  grade: CutGradeId = "P-1";
   loadError: string | null = null;
   /** 조기 재가동 페널티 (30% 아래로 식으면 해제) */
   heatPenalty = false;
@@ -282,6 +334,45 @@ export class GameEngine {
     }
     this.arrivalLeft = arrivalInterval(this.data.levels.inbox);
     this.selectedId = this.data.tray[0]?.id ?? null;
+  }
+
+  // ---------- 파쇄기 본체 ----------
+  get tier() {
+    return TIERS[this.data.tier];
+  }
+
+  /** 지금 본체의 컷 등급 */
+  get grade(): CutGradeId {
+    return this.tier.grade;
+  }
+
+  /** 한 번에 넣을 수 있는 장수 (본체 기본 + 용량 업그레이드) */
+  capacity() {
+    return feedCapacity(this.data.levels.capacity, this.data.tier);
+  }
+
+  /** 통이 담는 A4 장수 (잘게 자를수록 촘촘히 쌓여 더 들어감) */
+  binCap() {
+    return Math.round(binCapacity(this.data.levels.bin) * CUT_GRADES[this.grade].pack);
+  }
+
+  /** 다음 본체로 교체 */
+  buyTier() {
+    const next = this.data.tier + 1;
+    const def = TIERS[next];
+    if (!def || this.loadError) return false;
+    if (this.phase !== "idle" || this.current) return this.fail("파쇄가 끝난 뒤에 교체할 수 있어요");
+    if (this.emptyStep) return this.fail("통을 다 비운 뒤에 교체할 수 있어요");
+    if (this.data.money < def.cost) return false;
+    // 통 안의 조각은 그대로 옮겨 담는다 (양은 같고, 새 통의 비율로 환산)
+    const before = this.binCap();
+    this.data.money -= def.cost;
+    this.data.tier = next;
+    this.data.binFill = Math.min(1, (this.data.binFill * before) / this.binCap());
+    this.emit({ type: "tierUp", tier: next });
+    this.emitChange();
+    this.save();
+    return true;
   }
 
   // ---------- 구독 (React useSyncExternalStore) ----------
@@ -424,19 +515,23 @@ export class GameEngine {
     return null;
   }
 
-  /** 다음 투입 묶음: 선택한 서류 + 트레이 순서대로 용량(장수)만큼. 첫 서류는 뭉치라도 들어간다 */
+  /**
+   * 다음 투입 묶음: 선택한 서류 + 트레이 순서대로 용량(장수)만큼. 첫 서류는 용량을 넘어도 들어간다(대신 잘 걸림).
+   * 카드/CD는 전용 슬롯으로 하나씩만, 종이 묶음에는 끼지 않는다.
+   */
   batch(): DocData[] {
     const tray = this.data.tray;
-    const cap = feedCapacity(this.data.levels.capacity);
+    const cap = this.capacity();
     const first = tray.find((d) => d.id === this.selectedId) ?? tray[0];
     if (!first) return [];
+    if (isSlotDoc(first)) return [first];
     const out = [first];
-    let sheets = docSheets(first);
+    let load = docLoad(first);
     for (const d of tray) {
-      if (d === first) continue;
-      if (sheets + docSheets(d) > cap) continue;
+      if (d === first || isSlotDoc(d)) continue;
+      if (load + docLoad(d) > cap) continue;
       out.push(d);
-      sheets += docSheets(d);
+      load += docLoad(d);
     }
     return out;
   }
@@ -447,22 +542,30 @@ export class GameEngine {
     const firstIdx = this.data.tray.indexOf(docs[0]);
     this.data.tray = this.data.tray.filter((d) => !docs.includes(d));
 
-    const maxH = Math.max(...docs.map((d) => TEMPLATES[d.template].height));
-    // 여러 장을 한 번에 넣으면 조금 느려진다
-    const sheets = docs.reduce((s, d) => s + docSheets(d), 0);
-    const duration = shredTime(this.data.levels.speed) * (maxH / 297) * (1 + 0.08 * (sheets - 1));
+    const base = shredTime(this.data.levels.speed) * this.tier.time;
+    let duration: number;
+    if (isSlotDoc(docs[0])) {
+      // 카드/CD는 작아도 단단해서 오래 걸린다
+      duration = base * SLOT_TIME;
+    } else {
+      const maxH = Math.max(...docs.map((d) => TEMPLATES[d.template].height));
+      // 여러 장을 한 번에 넣으면 조금 느려진다 (명함 1장 = 3장 분)
+      const load = docs.reduce((s, d) => s + docLoad(d), 0);
+      duration = base * Math.max(0.35, maxH / 297) * (1 + 0.08 * (load - 1));
+    }
     const thickness = docs.reduce((s, d) => s + TEMPLATES[d.template].thickness * docSheets(d), 0);
     const heat =
       thickness *
       HEAT.perSheet *
       CUT_GRADES[this.grade].heat *
+      this.tier.heat *
       heatMult(this.data.levels.motor) *
       (this.heatPenalty ? HEAT.earlyPenalty : 1);
 
-    // 처리 안 한 방해 요소가 있으면 중간에 걸릴 수 있다
+    // 처리 안 한 방해 요소가 있거나 용량을 넘기면 중간에 걸릴 수 있다
     let jamAt: number | null = null;
     let heavy = false;
-    if (Math.random() < batchJamChance(docs)) {
+    if (Math.random() < batchJamChance(docs, this.data.tier, this.capacity())) {
       jamAt = 0.2 + Math.random() * 0.45;
       const pending = docs.flatMap(pendingHazards);
       heavy = pending.some((h) => HAZARDS[h.kind].heavy) || pending.length >= JAM.heavyCount;
@@ -482,7 +585,7 @@ export class GameEngine {
   private finishShred() {
     const d = this.data;
     const docs = this.current!.docs;
-    const reward = docs.reduce((s, doc) => s + docValue(doc, this.grade), 0);
+    const reward = docs.reduce((s, doc) => s + docValue(doc, d.tier), 0);
     d.money += reward;
     d.totalEarned += reward;
     const shreddedBefore = d.totalShredded;
@@ -491,10 +594,14 @@ export class GameEngine {
       const at = HAZARDS[kind].unlockAt;
       if (shreddedBefore < at && d.totalShredded >= at) this.emit({ type: "hazardUnlocked", kind });
     }
+    for (const id of TEMPLATE_IDS) {
+      const at = TEMPLATES[id].unlockAt;
+      if (at !== undefined && shreddedBefore < at && d.totalShredded >= at) this.emit({ type: "templateUnlocked", template: id });
+    }
 
     const before = d.binFill;
     const area = docs.reduce((s, doc) => s + docArea(doc), 0);
-    d.binFill = Math.min(1, d.binFill + area / binCapacity(d.levels.bin));
+    d.binFill = Math.min(1, d.binFill + area / this.binCap());
 
     this.incomeLog.push({ t: this.time, amount: reward });
     this.current = null;
@@ -575,7 +682,7 @@ export class GameEngine {
   // ---------- 방해 요소 ----------
   private tools(): ToolLevels {
     const l = this.data.levels;
-    return { stapleRemover: l.stapleRemover, cutter: l.cutter, letterOpener: l.letterOpener };
+    return { stapleRemover: l.stapleRemover, cutter: l.cutter, letterOpener: l.letterOpener, scissors: l.scissors };
   }
 
   /**
@@ -589,6 +696,12 @@ export class GameEngine {
     const wrap = doc.hazards.find((x) => x !== h && isContainer(x.kind) && x.left > 0);
     if (wrap && !isContainer(h.kind)) {
       this.fail(`먼저 ${HAZARDS[wrap.kind].name}에서 서류를 꺼내세요`);
+      return;
+    }
+    const need = HAZARDS[h.kind].tool;
+    if (need && this.data.levels[need] <= 0) {
+      const name = UPGRADES.find((u) => u.id === need)?.name ?? "도구";
+      this.fail(`${name}가 있어야 해요. 도구 탭에서 살 수 있어요`);
       return;
     }
     const tools = this.tools();
@@ -634,9 +747,18 @@ export class GameEngine {
     this.emitChange();
   }
 
+  private makeHazard(kind: HazardKind, x: number, y: number): Hazard {
+    return { kind, x, y, left: HAZARDS[kind].taps, removed: false };
+  }
+
   private makeHazards(seed: number, template: TemplateId): Hazard[] {
     const rng = createRng(seed ^ 0x51ed27);
-    const unlocked = HAZARD_KINDS.filter((k) => this.data.totalShredded >= HAZARDS[k].unlockAt);
+    // 카드/CD: 전용 방해 요소만 (칩 카드 절반, 케이스에 든 CD 60%)
+    if (template === "card") return rng.chance(0.5) ? [this.makeHazard("chip", 18, 23)] : [];
+    if (template === "cd") return rng.chance(0.6) ? [this.makeHazard("case", 60, 60)] : [];
+    // 명함은 작고 두꺼워 아무것도 안 붙음
+    if (template === "bizcard") return [];
+    const unlocked = HAZARD_KINDS.filter((k) => !HAZARDS[k].only && this.data.totalShredded >= HAZARDS[k].unlockAt);
     // 영수증은 작고 얇아서 구겨짐만, 앨범 파일엔 A4만 들어감
     const kinds = unlocked.filter((k) => {
       if (template === "receipt") return k === "crumple";
@@ -646,7 +768,7 @@ export class GameEngine {
     if (!kinds.length || !rng.chance(HAZARD_CHANCE)) return [];
 
     const { width: w, height: h } = TEMPLATES[template];
-    const make = (kind: HazardKind, x: number, y: number): Hazard => ({ kind, x, y, left: HAZARDS[kind].taps, removed: false });
+    const make = (kind: HazardKind, x: number, y: number) => this.makeHazard(kind, x, y);
     const kind = rng.pick(kinds);
     const out: Hazard[] = [];
     switch (kind) {
@@ -758,7 +880,7 @@ export class GameEngine {
 
   private recycleValue(fill: number) {
     const bonus = fill >= BIN.warnAt && fill < 1;
-    const value = fill * binCapacity(this.data.levels.bin) * CUT_GRADES[this.grade].pulpPrice * (bonus ? BIN.bonusMult : 1);
+    const value = fill * this.binCap() * CUT_GRADES[this.grade].pulpPrice * (bonus ? BIN.bonusMult : 1);
     return { reward: Math.round(value), bonus };
   }
 
@@ -861,10 +983,15 @@ export class GameEngine {
   private createDoc(): DocData {
     const seed = randomSeed();
     const rng = createRng(seed ^ 0x9e3779b9);
-    const total = TEMPLATE_IDS.reduce((s, id) => s + TEMPLATES[id].weight, 0);
+    // 해금된 양식만 (명함은 누적 장수, 카드/CD는 전용 슬롯이 있는 본체)
+    const ids = TEMPLATE_IDS.filter((id) => {
+      const t = TEMPLATES[id];
+      return this.data.totalShredded >= (t.unlockAt ?? 0) && this.data.tier >= (t.minTier ?? 0);
+    });
+    const total = ids.reduce((s, id) => s + TEMPLATES[id].weight, 0);
     let roll = rng.next() * total;
-    let template: TemplateId = TEMPLATE_IDS[0];
-    for (const id of TEMPLATE_IDS) {
+    let template: TemplateId = ids[0];
+    for (const id of ids) {
       roll -= TEMPLATES[id].weight;
       if (roll <= 0) {
         template = id;
@@ -874,7 +1001,7 @@ export class GameEngine {
     let rarity: RarityId | null = null;
     const r = rng.next();
     if (template === "official" && r < RARITIES.gold.chance * 3) rarity = "gold";
-    else if (template !== "receipt" && r > 1 - RARITIES.urgent.chance) rarity = "urgent";
+    else if (!["receipt", "bizcard", "card", "cd"].includes(template) && r > 1 - RARITIES.urgent.chance) rarity = "urgent";
     const hazards = this.makeHazards(seed, template);
     const doc: DocData = { id: this.data.nextDocId++, seed, template, rarity, hazards };
     // 앨범 파일: 서류가 든 페이지 수만큼의 뭉치
@@ -962,6 +1089,8 @@ export class GameEngine {
       if (affordable) affordableCount++;
       upgrades[def.id] = { id: def.id, level, maxed, cost, affordable };
     }
+    const nextTier = TIERS[d.tier + 1];
+    if (nextTier && d.money >= nextTier.cost) affordableCount++;
     const bagPackCost = BIN.bagPrice * BIN.bagPack;
     const recycle = this.recycleValue(d.binFill);
     return {
@@ -978,17 +1107,19 @@ export class GameEngine {
           ...doc,
           // 렌더 중에 엔진이 바꾸지 않도록 방해 요소는 복사본으로
           hazards: doc.hazards.map((h) => ({ ...h, pages: h.pages && [...h.pages] })),
-          value: docValue(doc, this.grade),
-          potentialValue: baseValue(doc, this.grade, removedHazards(doc) + pending.length),
+          value: docValue(doc, d.tier),
+          potentialValue: baseValue(doc, d.tier, removedHazards(doc) + pending.length),
           pendingCount: pending.length,
-          jamRisk: jamChance(doc),
+          jamRisk: jamChance(doc, d.tier),
+          load: docLoad(doc),
+          slot: isSlotDoc(doc),
           templateName: TEMPLATES[doc.template].name,
           rarityLabel: doc.rarity ? RARITIES[doc.rarity].label : null,
         };
       }),
       selectedId: this.selectedId,
       batchIds: this.batch().map((doc) => doc.id),
-      batchJamRisk: batchJamChance(this.batch()),
+      batchJamRisk: batchJamChance(this.batch(), d.tier, this.capacity()),
       jam: this.current?.jam ? { ...this.current.jam } : null,
       reversing: this.reversing,
       autoReverse: d.levels.autoReverse > 0,
@@ -997,7 +1128,11 @@ export class GameEngine {
         return next ? { kind: next, at: HAZARDS[next].unlockAt } : null;
       })(),
       tools: this.tools(),
-      capacity: feedCapacity(d.levels.capacity),
+      tier: tierView(d.tier),
+      nextTier: TIERS[d.tier + 1]
+        ? { ...tierView(d.tier + 1), cost: TIERS[d.tier + 1].cost, affordable: d.money >= TIERS[d.tier + 1].cost }
+        : null,
+      capacity: this.capacity(),
       traySlots: traySlots(d.levels.inbox),
       arrivalLeft: this.arrivalLeft,
       arrivalTotal: arrivalInterval(d.levels.inbox),
@@ -1007,7 +1142,7 @@ export class GameEngine {
       coolEta: d.overheated ? Math.max(0, d.heat - HEAT.resumeAt) / coolRate(d.levels.fan) : 0,
       canEarlyRestart: d.overheated && d.heat <= HEAT.earlyAt,
       binFill: d.binFill,
-      binCapacity: binCapacity(d.levels.bin),
+      binCapacity: this.binCap(),
       bags: d.bags,
       bagPackCost,
       canBuyBags: d.money >= bagPackCost && d.bags + BIN.bagPack <= BIN.maxBags,

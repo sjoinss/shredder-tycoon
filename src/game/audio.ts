@@ -66,6 +66,7 @@ export class SoundBoard {
         break;
       case "buy":
       case "buyBags":
+      case "tierUp":
         this.purchase();
         break;
       case "overheat":
@@ -126,6 +127,7 @@ export class SoundBoard {
         this.hazardSound(e.kind, e.done);
         break;
       case "hazardUnlocked":
+      case "templateUnlocked":
       case "imageAdded":
         this.chime();
         break;

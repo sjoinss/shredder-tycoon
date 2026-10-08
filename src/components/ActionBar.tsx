@@ -79,13 +79,16 @@ function FeedPanel({ snap, onFeed, onEmpty }: Props) {
   const batch = snap.batchIds.map((id) => snap.tray.find((d) => d.id === id)!).filter(Boolean);
   const first = batch[0];
   const total = batch.reduce((s, d) => s + d.value, 0);
-  const sheets = batch.reduce((s, d) => s + (d.sheets ?? 1), 0);
+  const load = batch.reduce((s, d) => s + d.load, 0);
+  const slot = !!first?.slot;
+  const over = slot ? 0 : load - snap.capacity;
 
   let label = "투입";
   if (snap.phase === "shredding") label = "파쇄 중…";
   else if (snap.phase === "cooldown") label = `대기 ${formatSeconds(snap.phaseLeft)}`;
   else if (block === "binFull") label = "통 가득";
-  else if (sheets > 1) label = `${sheets}장 투입`;
+  else if (slot) label = `${first.templateName} 슬롯 투입`;
+  else if (load > 1) label = `${load}장 투입`;
 
   const reason = block && block !== "busy" ? BLOCK_REASON[block] : null;
 
@@ -97,6 +100,7 @@ function FeedPanel({ snap, onFeed, onEmpty }: Props) {
             <span className="actionbar__k">선택</span> {first.rarityLabel ?? first.templateName} · No.
             {String(first.id).padStart(4, "0")}
             {batch.length > 1 && ` 외 ${batch.length - 1}건`} · <strong>₩{formatWon(total)}</strong>
+            {over > 0 && <span className="actionbar__risk"> 용량 {over}장 초과</span>}
             {snap.batchJamRisk > 0 && (
               <span className="actionbar__risk">
                 {" "}

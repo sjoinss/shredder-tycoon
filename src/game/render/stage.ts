@@ -1,4 +1,4 @@
-import { BIN, CUT_GRADES, PAPER_COLORS, TEMPLATES, binCapacity } from "../data";
+import { BIN, CUT_GRADES, PAPER_COLORS, TEMPLATES } from "../data";
 import type { GameEngine, GameEvent } from "../engine";
 import { formatWon } from "../format";
 import type { DocData } from "../save";
@@ -35,6 +35,9 @@ interface Geometry {
   slotY: number;
   slotX0: number;
   slotX1: number;
+  /** 카드/CD 전용 슬롯 (없으면 null) */
+  cardX0: number | null;
+  cardX1: number | null;
   headBottom: number;
   /** 통의 제자리 */
   bx: number;
@@ -198,7 +201,13 @@ export class StageRenderer {
     const binH = Math.max(90, H * 0.34);
     const topY = Math.min(H * 0.44, H - hh - binH - 10);
     const hx = (W - hw) / 2;
-    const slotW = hw * 0.76;
+    // 전용 슬롯이 있는 본체: 종이 슬롯을 왼쪽으로 줄이고 오른쪽에 카드/CD 슬롯
+    const hasSlot = this.engine.tier.slot;
+    const slotW = hw * (hasSlot ? 0.56 : 0.76);
+    const slotX0 = hasSlot ? hx + hw * 0.045 : (W - slotW) / 2;
+    const scale = (slotW * 0.92) / 210;
+    const cardW = 130 * scale;
+    const cardX1 = hx + hw * 0.955;
     const bw = hw * 0.9;
     const by = topY + hh;
     const bh = H - 8 - by;
@@ -211,8 +220,10 @@ export class StageRenderer {
       topY,
       lidH,
       slotY: topY + lidH * 0.5,
-      slotX0: (W - slotW) / 2,
-      slotX1: (W + slotW) / 2,
+      slotX0,
+      slotX1: slotX0 + slotW,
+      cardX0: hasSlot ? cardX1 - cardW : null,
+      cardX1: hasSlot ? cardX1 : null,
       headBottom: by,
       bx: (W - bw) / 2,
       bw,
@@ -223,8 +234,15 @@ export class StageRenderer {
       cy: H - 8 - ch,
       cw,
       ch,
-      scale: (slotW * 0.92) / 210,
+      scale,
     };
+  }
+
+  /** 이 서류가 들어갈 슬롯의 가운데 x */
+  private slotCenter(doc: DocData) {
+    const g = this.g;
+    if (TEMPLATES[doc.template].slot && g.cardX0 !== null && g.cardX1 !== null) return (g.cardX0 + g.cardX1) / 2;
+    return (g.slotX0 + g.slotX1) / 2;
   }
 
   private binHome() {
@@ -243,11 +261,13 @@ export class StageRenderer {
     this.pileCtx = ctx;
 
     if (this.pileLevel <= 0) return;
-    const seg = 50 * this.g.scale;
-    const sw = 7 * this.g.scale;
+    // 지금 컷 등급의 조각 크기로 채움 (작을수록 많이)
+    const grade = CUT_GRADES[this.engine.grade];
+    const seg = ((grade.segment[0] + grade.segment[1]) / 2) * this.g.scale;
+    const sw = grade.stripWidth * this.g.scale;
     const surface = this.surfaceY() - this.g.by;
     const floor = bh - 6;
-    const count = Math.min(1600, Math.round(((floor - surface) * bw) / (seg * sw) * 2.2));
+    const count = Math.min(4000, Math.round(((floor - surface) * bw) / (seg * sw) * 2.2));
     for (let i = 0; i < count; i++) {
       const x = Math.random() * bw;
       const y = surface + Math.random() * (floor - surface);
@@ -275,7 +295,14 @@ export class StageRenderer {
       return;
     }
     switch (e.type) {
+      case "tierUp":
+        // 본체가 바뀌면 슬롯 배치·종이 배율이 달라진다
+        this.layout();
+        this.rebuildPile();
+        this.popups.push({ text: "새 파쇄기!", sub: CUT_GRADES[this.engine.grade].label, x: this.W / 2, y: this.g.topY - 10, t: 0, big: true });
+        break;
       case "reset":
+        this.layout();
         this.pool.clear();
         this.feeds = [];
         this.popups = [];
@@ -296,7 +323,7 @@ export class StageRenderer {
             docW: t.width,
             docH: t.height,
             // 묶음은 살짝 어긋나게 겹쳐 보이게
-            x: (this.W - w) / 2 + (i - (n - 1) / 2) * 5,
+            x: this.slotCenter(doc) - w / 2 + (i - (n - 1) / 2) * 5,
             dy: -i * 2,
           };
         });
@@ -375,7 +402,7 @@ export class StageRenderer {
 
   private emitBand(f: Feed, from: number, seg: number, stripW: number) {
     const { scale, headBottom } = this.g;
-    const fillPerA4 = 1 / binCapacity(this.engine.data.levels.bin);
+    const fillPerA4 = 1 / this.engine.binCap();
     const cols = Math.ceil(f.docW / stripW);
     for (let c = 0; c < cols; c++) {
       const sw = Math.min(stripW, f.docW - c * stripW);
@@ -399,7 +426,7 @@ export class StageRenderer {
         floor: this.surfaceY() - Math.random() * 8,
       };
       const p = this.pool.spawn(init);
-      if (!p) this.stamp(init); // 상한 초과: 떨어지는 연출 없이 바로 더미에 쌓음
+      if (!p) this.stamp({ ...init, y: init.floor }); // 상한 초과: 떨어지는 연출 없이 바로 더미 표면에 쌓음
       this.pileLevel = Math.min(1, this.pileLevel + ((sw * seg) / (210 * 297)) * fillPerA4);
     }
   }
@@ -449,7 +476,7 @@ export class StageRenderer {
     const g = this.g;
     // 심한 잼: 슬롯 위로 나와 있는 종이를 탭해서 당긴다
     if (this.engine.current?.jam?.stage === "pull") {
-      return x >= g.slotX0 - 10 && x <= g.slotX1 + 10 && y >= g.slotY - 160 && y <= g.slotY + 6;
+      return x >= g.slotX0 - 10 && x <= (g.cardX1 ?? g.slotX1) + 10 && y >= g.slotY - 160 && y <= g.slotY + 6;
     }
     const inBin = x >= this.binX && x <= this.binX + g.bw && y >= this.binY - 30 && y <= this.binY + g.bh;
     switch (this.engine.emptyStep) {
@@ -897,7 +924,7 @@ export class StageRenderer {
         return {
           doc,
           canvas: getDocCanvas(doc),
-          x: (this.W - w) / 2 + (i - (n - 1) / 2) * 5,
+          x: this.slotCenter(doc) - w / 2 + (i - (n - 1) / 2) * 5,
           w,
           h: t.height * g.scale,
           dy: -i * 2,
@@ -919,7 +946,7 @@ export class StageRenderer {
       const it = items[i];
       const top = bottom - it.h + it.dy;
       ctx.fillStyle = "rgba(31,42,51,0.12)";
-      ctx.fillRect(it.x + 4, top + 4, it.w, it.h);
+      if (it.doc.template !== "cd") ctx.fillRect(it.x + 4, top + 4, it.w, it.h);
       ctx.drawImage(it.canvas, it.x, top, it.w, it.h);
       // 방해 요소도 같은 좌표에 덧그림 (트레이·작업대와 같은 모양)
       drawHazards(ctx, it.doc, it.x, top, g.scale);
@@ -950,6 +977,20 @@ export class StageRenderer {
     ctx.fillStyle = colors.slot;
     roundRect(ctx, g.slotX0, g.slotY - 2.5, g.slotX1 - g.slotX0, 5, 2.5);
     ctx.fill();
+    if (g.cardX0 !== null && g.cardX1 !== null) {
+      // 카드/CD 전용 슬롯: 두툼한 테두리 + 작은 이름표
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      roundRect(ctx, g.cardX0 - 4, g.slotY - 6, g.cardX1 - g.cardX0 + 8, 12, 4);
+      ctx.fill();
+      ctx.fillStyle = colors.slot;
+      roundRect(ctx, g.cardX0, g.slotY - 2.5, g.cardX1 - g.cardX0, 5, 2.5);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.font = `700 ${Math.max(8, hw * 0.022)}px ui-monospace, "SFMono-Regular", Consolas, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText("CARD·CD", (g.cardX0 + g.cardX1) / 2, g.slotY + 7);
+    }
 
     ctx.strokeStyle = colors.line;
     ctx.lineWidth = 2;

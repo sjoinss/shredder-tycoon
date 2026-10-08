@@ -2,7 +2,7 @@
 
 import { capturePointer } from "./hooks";
 import { useEffect, useRef, useState } from "react";
-import { ENVELOPE_OPENED, HAZARDS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, TORN_MULT, tapeCuts } from "@/game/data";
+import { CONTAINER_KINDS, ENVELOPE_OPENED, HAZARDS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, TORN_MULT, tapeCuts } from "@/game/data";
 import { actionsLeft, type DocView, type ToolLevels } from "@/game/engine";
 import { formatWon } from "@/game/format";
 import { getDocCanvas } from "@/game/render/docgen";
@@ -34,6 +34,10 @@ function hitCenter(h: Hazard, docW: number, docH: number): [number, number] {
       return [h.x, h.y + 4];
     case "crumple":
       return [docW / 2, docH * 0.6];
+    case "case":
+      return [docW / 2, docH * 0.82];
+    case "chip":
+      return [h.x, h.y + 16];
     case "sleeve":
       return [docW / 2, docH * 0.85];
     case "postit":
@@ -57,6 +61,10 @@ function actionLabel(h: Hazard, tools: ToolLevels) {
       return h.left === 2 ? "집게 레버 열기" : "집게 빼기";
     case "crumple":
       return `구김 펴기 (남은 ${h.left}번)`;
+    case "chip":
+      return tools.scissors > 0 ? "가위로 IC 칩 잘라 내기" : "IC 칩 자르기 (가위가 필요해요)";
+    case "case":
+      return "CD 케이스 열고 꺼내기";
     case "sleeve":
       return "투명 파일에서 꺼내기";
     case "tape":
@@ -74,6 +82,10 @@ function chipText(h: Hazard, tools: ToolLevels): string | null {
   switch (h.kind) {
     case "crumple":
       return `펴기 ${h.left}`;
+    case "case":
+      return "케이스 열고 꺼내기";
+    case "chip":
+      return tools.scissors > 0 ? "✂ 칩 자르기" : "✂ 가위 필요";
     case "sleeve":
       return "↑ 위로 밀어 꺼내기";
     case "envelope":
@@ -92,10 +104,12 @@ interface Props {
 
 export default function Workbench({ doc, tools, onTreat }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const paperH = usePaperHeight();
+  const box = usePaperHeight();
   const t = TEMPLATES[doc.template];
-  const scale = paperH / t.height;
+  // 긴 변이 작업대 칸에 맞도록 (카드·CD처럼 가로가 긴 물건도)
+  const scale = Math.min(box / t.height, box / t.width);
   const paperW = Math.round(t.width * scale);
+  const paperH = Math.round(t.height * scale);
   const hazKey = doc.hazards.map((h) => h.left).join(",") + (doc.torn ? "t" : "");
   const swipe = useRef<{ y: number; id: number } | null>(null);
 
@@ -105,7 +119,7 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
   const slideOut = pending.find(
     ({ h }) => h.kind === "sleeve" || (h.kind === "envelope" && h.left <= ENVELOPE_OPENED),
   );
-  const wrap = pending.find(({ h }) => h.kind === "sleeve" || h.kind === "envelope" || h.kind === "album");
+  const wrap = pending.find(({ h }) => CONTAINER_KINDS.includes(h.kind));
   const firstTip = pending[0] ? HAZARDS[pending[0].h.kind].tip : null;
 
   // 서류 + 방해 요소를 작업대 크기로 그림 (방해 요소가 바뀔 때마다 다시)
@@ -119,7 +133,7 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, paperW + PAD * 2, paperH + PAD * 2);
     ctx.fillStyle = "rgba(31,42,51,0.18)";
-    ctx.fillRect(PAD + 4, PAD + 4, paperW, paperH);
+    if (doc.template !== "cd") ctx.fillRect(PAD + 4, PAD + 4, paperW, paperH);
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(getDocCanvas(doc), PAD, PAD, paperW, paperH);
     drawHazards(ctx, doc, PAD, PAD, scale);
@@ -224,7 +238,10 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
                   {h.left > 0 ? <span className="todo-box" aria-hidden="true" /> : <IconCheck size={16} />}
                   <span>
                     {HAZARDS[h.kind].name} {HAZARDS[h.kind].action}
-                    {h.left > 0 && h.kind === "album" && <span className="workbench__taps"> (서류 {h.left}장 남음)</span>}
+                    {h.left > 0 && h.kind === "chip" && tools.scissors <= 0 && (
+                      <span className="workbench__taps"> (가위 필요 · 도구 탭)</span>
+                    )}
+                    {h.left > 0 && h.kind === "album" &&<span className="workbench__taps"> (서류 {h.left}장 남음)</span>}
                     {h.left > 0 && h.kind !== "album" && n > 1 && <span className="workbench__taps"> (남은 {n}번)</span>}
                     {h.left > 0 && wrap && wrap.i !== i && (
                       <span className="workbench__taps"> · {HAZARDS[wrap.h.kind].name}에서 꺼낸 뒤</span>
