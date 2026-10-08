@@ -1,7 +1,7 @@
 import {
   ALBUM,
   BIN,
-  CLIENTS,
+  REQUESTERS,
   HAZARDS,
   ORDERS,
   PAGE_DOC,
@@ -63,7 +63,7 @@ export interface SaveData {
   levels: Record<UpgradeId, number>;
   tray: DocData[];
   nextDocId: number;
-  /** 평판 (의뢰 완료로 오름 → 수익 배율) */
+  /** 평판 (요청 완료로 오름 → 수익 배율) */
   reputation: number;
   orders: { offers: Order[]; active: Order | null; nextId: number };
   /** 지점 확장 횟수 (영구 수익 배율) */
@@ -73,7 +73,7 @@ export interface SaveData {
   lastSeen: number;
 }
 
-/** 거래처 의뢰: "○○ 서류 N장을 P-x 이상으로 M분 안에" */
+/** 다른 팀의 파쇄 요청: "○○ 서류 N장을 P-x 이상으로 M분 안에" */
 export interface Order {
   id: number;
   client: string;
@@ -84,7 +84,7 @@ export interface Order {
   minTier: number;
   /** 제한 시간(초) */
   time: number;
-  /** 남은 시간(초) — 받은 의뢰만 줄어듦 */
+  /** 남은 시간(초) — 받은 요청만 줄어듦 */
   left: number;
   progress: number;
   reward: number;
@@ -219,8 +219,8 @@ function sanitizeOrder(raw: unknown): Order | null {
   const time = num(r.time, 1, 24 * 3600);
   return {
     id: Math.floor(num(r.id, 1)),
-    // 거래처 이름은 우리 목록에 있는 것만 (화면에 그대로 보이므로)
-    client: typeof r.client === "string" && CLIENTS.includes(r.client) ? r.client : CLIENTS[0],
+    // 요청한 사람 이름은 우리 목록에 있는 것만 (화면에 그대로 보이므로)
+    client: typeof r.client === "string" && REQUESTERS.includes(r.client) ? r.client : REQUESTERS[0],
     template,
     count,
     minTier: Math.floor(num(r.minTier, 0, TIERS.length - 1)),

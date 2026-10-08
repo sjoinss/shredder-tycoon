@@ -1,29 +1,36 @@
 "use client";
 
-import { capturePointer } from "./hooks";
+import { capturePointer, useSettings } from "./hooks";
 import { useEffect, useRef, useState } from "react";
-import { CONTAINER_KINDS, ENVELOPE_OPENED, HAZARDS, TIERS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, TORN_MULT, tapeCuts } from "@/game/data";
+import { CONTAINER_KINDS, ENVELOPE_OPENED, HAZARDS, TIERS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, tapeCuts } from "@/game/data";
 import { actionsLeft, type DocView, type ToolLevels } from "@/game/engine";
-import { formatWon } from "@/game/format";
 import { getDocCanvas } from "@/game/render/docgen";
 import { POSTIT_SIZE, TAPE_LENGTH, drawHazards } from "@/game/render/hazards";
 import type { Hazard } from "@/game/save";
-import { IconAlert, IconCheck } from "./Icons";
+import { settingsStore } from "@/game/settings";
+import { IconClose } from "./Icons";
 
 const PAD = 12; // 클립·집게가 종이 위로 삐져나오는 여유
 
-/** 화면 크기에 따른 작업대 종이 높이(px) */
-function usePaperHeight() {
-  const [h, setH] = useState(220);
+/** 요소 크기(px)를 따라간다: 작업대는 파쇄기 위 남은 공간에 맞춰 종이 크기를 정한다 */
+function useBoxSize(ref: React.RefObject<HTMLElement | null>) {
+  const [size, setSize] = useState({ w: 0, h: 0 });
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 601px)");
-    const update = () => setH(mq.matches ? 280 : 220);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-  return h;
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize((s) => (Math.abs(s.w - width) < 1 && Math.abs(s.h - height) < 1 ? s : { w: width, h: height }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return size;
 }
+
+/** 포스트잇 너비 */
+const noteWidth = (w: number) => (w >= 520 ? 150 : 112);
+const ALBUM_NAV = 52;
 
 /** 방해 요소 탭 영역의 중심 (mm) */
 function hitCenter(h: Hazard, docW: number, docH: number): [number, number] {
@@ -102,14 +109,22 @@ interface Props {
   /** 지금 본체 티어 (그냥 갈 수 있는 방해 요소 안내용) */
   tier: number;
   onTreat: (index: number, page?: number) => void;
+  onClose: () => void;
 }
 
-export default function Workbench({ doc, tools, tier, onTreat }: Props) {
+/** 서류를 크게 펼쳐 방해 요소를 고치는 화면 (파쇄기 위에 팝업처럼) */
+export default function Workbench({ doc, tools, tier, onTreat, onClose }: Props) {
+  const settings = useSettings();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const box = usePaperHeight();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const body = useBoxSize(bodyRef);
   const t = TEMPLATES[doc.template];
-  // 긴 변이 작업대 칸에 맞도록 (카드·CD처럼 가로가 긴 물건도)
-  const scale = Math.min(box / t.height, box / t.width);
+  // 남은 공간(할 일 칸 제외)에 종이가 통째로 들어가게. 앨범은 아래 넘기기 버튼 자리를 뺀다
+  const hasAlbum = doc.hazards.some((h) => h.kind === "album" && h.left > 0);
+  const noteW = noteWidth(body.w);
+  const maxW = Math.max(40, body.w - noteW - 12 - PAD * 2);
+  const maxH = Math.max(40, body.h - PAD * 2 - (hasAlbum ? ALBUM_NAV : 0));
+  const scale = Math.min(maxH / t.height, maxW / t.width);
   const paperW = Math.round(t.width * scale);
   const paperH = Math.round(t.height * scale);
   const hazKey = doc.hazards.map((h) => h.left).join(",") + (doc.torn ? "t" : "");
@@ -149,12 +164,12 @@ export default function Workbench({ doc, tools, tier, onTreat }: Props) {
     ({ h }) => h.kind === "sleeve" || (h.kind === "envelope" && h.left <= ENVELOPE_OPENED),
   );
   const wrap = pending.find(({ h }) => CONTAINER_KINDS.includes(h.kind));
-  // 지금 본체가 그냥 갈아버리는 것이면 그렇게 안내 (빼면 보너스만)
-  const firstKind = pending[0]?.h.kind;
-  const firstTip = firstKind
-    ? TIERS[tier].handles[firstKind] === 0
-      ? `${HAZARDS[firstKind].name}: 지금 파쇄기는 그냥 갈아요. 직접 빼면 수익 보너스만 받아요.`
-      : HAZARDS[firstKind].tip
+  // 처음 만난 방해 요소만 한 번 설명 (지금 본체가 그냥 갈아버리는 것이면 그렇게 안내)
+  const newKind = pending.find(({ h }) => !settings.seenTips.includes(h.kind))?.h.kind;
+  const tutorial = newKind
+    ? TIERS[tier].handles[newKind] === 0
+      ? `지금 파쇄기는 ${HAZARDS[newKind].name}도 그냥 갈아요. 직접 빼면 수익 보너스를 받아요.`
+      : HAZARDS[newKind].tip
     : null;
 
   // 서류 + 방해 요소를 작업대 크기로 그림 (방해 요소가 바뀔 때마다 다시)
@@ -200,21 +215,29 @@ export default function Workbench({ doc, tools, tier, onTreat }: Props) {
       className="workbench"
       aria-labelledby="workbench-title"
     >
-      <div className="workbench__head">
-        <h2 id="workbench-title" className="section-title" tabIndex={-1}>
-          작업대
-        </h2>
-        <span className="workbench__doc">
-          No.{String(doc.id).padStart(4, "0")} {doc.rarityLabel ?? doc.templateName}
-          {(doc.sheets ?? 1) > 1 && ` · ${doc.sheets}장 뭉치`}
-        </span>
-        <span className="workbench__risk">
-          <IconAlert size={16} />
-          그냥 넣으면 잼 {Math.round(doc.jamRisk * 100)}%
-        </span>
-      </div>
+      <h2 id="workbench-title" className="sr-only" tabIndex={-1}>
+        서류 정리: No.{String(doc.id).padStart(4, "0")} {doc.rarityLabel ?? doc.templateName}
+      </h2>
+      <button type="button" className="workbench__close" onClick={onClose} aria-label="서류 정리 닫기">
+        <IconClose size={20} />
+      </button>
+      {newKind && tutorial && (
+        <div className="workbench__tutorial" role="note">
+          <p>
+            <strong>처음 보는 {HAZARDS[newKind].name}</strong>
+            {tutorial}
+          </p>
+          <button
+            type="button"
+            className="workbench__tutorial-ok"
+            onClick={() => settingsStore.set({ seenTips: [...settings.seenTips, newKind] })}
+          >
+            알겠어요
+          </button>
+        </div>
+      )}
 
-      <div className="workbench__body">
+      <div className="workbench__body" ref={bodyRef}>
         {album ? (
           <AlbumView
             key={doc.id}
@@ -268,40 +291,31 @@ export default function Workbench({ doc, tools, tier, onTreat }: Props) {
           </div>
         )}
 
-        <div className="workbench__side">
+        {/* 서류 옆 포스트잇: 고칠 것만 */}
+        <div className="workbench__note" style={{ width: noteW }}>
+          <p className="workbench__note-head" aria-hidden="true">
+            할 일
+          </p>
           <ul className="workbench__todo" aria-label="할 일">
-            {doc.hazards.map((h, i) => {
+            {pending.map(({ h, i }) => {
               const n = actionsLeft(h, tools);
               return (
-                <li key={i} className={h.left > 0 ? undefined : "is-done"}>
-                  {h.left > 0 ? <span className="todo-box" aria-hidden="true" /> : <IconCheck size={16} />}
+                <li key={i}>
+                  <span className="todo-box" aria-hidden="true" />
                   <span>
-                    {HAZARDS[h.kind].name} {HAZARDS[h.kind].action}
-                    {h.left > 0 && h.kind === "chip" && tools.scissors <= 0 && (
-                      <span className="workbench__taps"> (가위 필요 · 도구 탭)</span>
+                    {HAZARDS[h.kind].name}
+                    {h.kind === "chip" && tools.scissors <= 0 && <span className="workbench__taps"> (가위 필요)</span>}
+                    {h.kind === "album" ? (
+                      <span className="workbench__taps"> {h.left}장</span>
+                    ) : (
+                      n > 1 && <span className="workbench__taps"> ×{n}</span>
                     )}
-                    {h.left > 0 && h.kind === "album" &&<span className="workbench__taps"> (서류 {h.left}장 남음)</span>}
-                    {h.left > 0 && h.kind !== "album" && n > 1 && <span className="workbench__taps"> (남은 {n}번)</span>}
-                    {h.left > 0 && wrap && wrap.i !== i && (
-                      <span className="workbench__taps"> · {HAZARDS[wrap.h.kind].name}에서 꺼낸 뒤</span>
-                    )}
-                    {h.left <= 0 && <span className="sr-only"> 완료</span>}
+                    {wrap && wrap.i !== i && <span className="sr-only"> ({HAZARDS[wrap.h.kind].name}에서 꺼낸 뒤)</span>}
                   </span>
                 </li>
               );
             })}
           </ul>
-          {doc.torn && (
-            <p className="workbench__torn">
-              <IconAlert size={16} />
-              찢어진 서류 · 수익 ×{TORN_MULT}
-            </p>
-          )}
-          <p className="workbench__value">
-            처리하면 <strong>₩{formatWon(doc.potentialValue)}</strong>
-            <span className="workbench__now"> (지금 ₩{formatWon(doc.value)})</span>
-          </p>
-          {firstTip && <p className="postit workbench__tip">{firstTip}</p>}
         </div>
       </div>
     </section>

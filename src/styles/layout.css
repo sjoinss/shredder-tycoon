@@ -1,4 +1,4 @@
-/* 반응형 레이아웃 (모바일 우선): ≤600 하단 시트 / 601~1023 하단 상시 노출 / ≥1024 우측 고정 패널 / ≥1440 업무 일지 추가 */
+/* 반응형 레이아웃 (모바일 우선): <1024 아래 탭으로 화면 전환 / ≥1024 우측 고정 패널 / ≥1440 업무 일지 추가 */
 
 *,
 *::before,
@@ -13,7 +13,8 @@ body {
 }
 
 body {
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   font-family: var(--font-sans);
   font-size: var(--font-size-md);
   line-height: 1.5;
@@ -57,80 +58,79 @@ ol {
   border: 0;
 }
 
+/*
+ * 한 화면 레이아웃: 페이지는 스크롤하지 않고, 업그레이드 목록·서랍 같은 안쪽 칸만 스크롤한다.
+ * 모바일(<1024): HUD / 화면(파쇄기·업그레이드·의뢰 중 하나) / 아래 탭
+ * PC(≥1024): HUD+파쇄기 | 오른쪽 업그레이드, 아주 넓으면(≥1440) 가운데 업무 일지 칸 추가
+ */
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     "hud"
-    "main";
-  grid-template-rows: auto 1fr;
-  min-height: 100dvh;
-  padding-bottom: calc(var(--sheet-collapsed) + env(safe-area-inset-bottom));
+    "content"
+    "tabbar";
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .hud {
   grid-area: hud;
-  position: sticky;
-  top: 0;
   z-index: 20;
 }
 
-.main {
-  grid-area: main;
+.play,
+.side,
+.orders-view {
+  grid-area: content;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tabbar {
+  grid-area: tabbar;
+}
+
+/* 모바일: 아래 탭으로 한 화면씩 */
+.app[data-view="play"] .side,
+.app[data-view="play"] .orders-view,
+.app[data-view="upgrades"] .play,
+.app[data-view="upgrades"] .orders-view,
+.app[data-view="orders"] .play,
+.app[data-view="orders"] .side {
+  display: none;
+}
+
+.play {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
-  min-width: 0;
-  padding: var(--space-md) max(var(--space-md), env(safe-area-inset-right)) var(--space-md)
-    max(var(--space-md), env(safe-area-inset-left));
+  gap: var(--space-sm);
+  padding: var(--space-sm) max(var(--space-sm), env(safe-area-inset-right)) var(--space-sm)
+    max(var(--space-sm), env(safe-area-inset-left));
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
 }
 
 .stage__canvas {
-  height: clamp(240px, 40dvh, 560px);
+  height: 100%;
+  min-height: 200px;
 }
 
-/* 모바일: 주 CTA(투입)는 항상 엄지 영역에 — 접힌 시트 바로 위에 고정 */
-.actionbar {
-  position: sticky;
-  bottom: calc(var(--sheet-collapsed) + env(safe-area-inset-bottom));
-  z-index: 10;
-  margin: 0 calc(var(--space-md) * -1);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-desk);
-  border-top: 1px solid var(--color-border);
-}
-
-.goals {
-  display: none;
-}
-
-/* ---------- 모바일: 하단 시트 ---------- */
-.upgrades {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
+.side {
   display: flex;
   flex-direction: column;
-  height: var(--sheet-h);
-  padding-bottom: env(safe-area-inset-bottom);
-  transition: height 0.24s ease;
 }
 
-.upgrades[data-sheet="collapsed"] {
-  --sheet-h: calc(var(--sheet-collapsed) + env(safe-area-inset-bottom));
-}
-.upgrades[data-sheet="half"] {
-  --sheet-h: 52dvh;
-}
-/* 전체로 올려도 HUD와 파쇄 장면 일부는 보이게 */
-.upgrades[data-sheet="full"] {
-  --sheet-h: calc(100dvh - var(--hud-h) - 96px);
-}
-
-.upgrades[data-sheet="collapsed"] .upgrades__body {
-  display: none;
+.upgrades {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .upgrades__body {
@@ -147,49 +147,21 @@ ol {
   overscroll-behavior: contain;
 }
 
-/* ---------- 태블릿 ---------- */
+.orders-view {
+  display: grid;
+  align-content: start;
+  gap: var(--space-lg);
+  padding: var(--space-md);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+
+/* ---------- 태블릿: 업그레이드 2열 ---------- */
 @media (min-width: 601px) {
-  .app {
-    grid-template-areas:
-      "hud"
-      "main"
-      "upg";
-    grid-template-rows: auto auto auto;
-    padding-bottom: env(safe-area-inset-bottom);
+  .play {
+    padding-inline: var(--space-lg);
   }
-
-  .main {
-    padding-inline: var(--space-xl);
-    gap: var(--space-lg);
-  }
-
-  .stage__canvas {
-    height: clamp(260px, 46dvh, 560px);
-  }
-
-  /* 태블릿/PC: 시트가 없으므로 화면 맨 아래에 붙인다 */
-  .actionbar {
-    bottom: 0;
-    margin: 0 calc(var(--space-xl) * -1);
-    padding: var(--space-sm) var(--space-xl) var(--space-md);
-  }
-
-  .upgrades {
-    grid-area: upg;
-    position: static;
-    height: auto;
-    margin: 0 var(--space-xl) var(--space-xl);
-    transition: none;
-  }
-
-  .upgrades[data-sheet] .upgrades__body {
-    display: flex;
-  }
-
-  .upgrades__handle {
-    display: none !important;
-  }
-
   .ledger {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -198,44 +170,46 @@ ol {
 
 /* ---------- PC ---------- */
 @media (min-width: 1024px) {
+  /* 오른쪽 칸은 펼치면 380px, 접으면 0 (가장자리 손잡이만 떠 있음) */
   .app {
-    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
-      "hud upg"
-      "main upg";
-    grid-template-rows: auto 1fr;
+      "hud side"
+      "content side";
   }
 
-  .stage__canvas {
-    height: clamp(320px, 52dvh, 640px);
+  /* 모바일 화면 전환 규칙을 끈다 */
+  .app[data-view] .play,
+  .app[data-view] .side {
+    display: flex;
   }
 
-  .upgrades {
-    position: sticky;
-    top: 0;
-    height: 100dvh;
-    margin: 0;
+  .side {
+    grid-area: side;
+    position: relative;
+    min-height: 0;
+  }
+
+  .side[data-open] {
+    border-left: var(--line) solid var(--color-ink-line);
+    background: var(--color-surface);
+  }
+
+  .side__body {
+    display: flex;
+    flex-direction: column;
+    width: 380px;
+    min-height: 0;
+  }
+
+  .app[data-view] .side__body > .orders-view {
+    display: grid;
+    flex: 1;
   }
 
   .ledger {
     display: block;
-  }
-}
-
-@media (min-width: 1440px) {
-  .app {
-    grid-template-columns: minmax(0, 1fr) 300px 400px;
-    grid-template-areas:
-      "hud hud upg"
-      "main goals upg";
-  }
-
-  .goals {
-    grid-area: goals;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-lg);
-    padding: var(--space-lg) var(--space-xl) var(--space-lg) 0;
   }
 }
 

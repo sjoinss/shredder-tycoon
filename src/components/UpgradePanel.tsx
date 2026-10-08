@@ -4,17 +4,12 @@ import { useRef, useState } from "react";
 import { BIN, CUT_GRADES, PRESTIGE, TABS, TIERS, UPGRADES, branchMult, type UpgradeId, type UpgradeTab } from "@/game/data";
 import type { Snapshot } from "@/game/engine";
 import { formatWon } from "@/game/format";
-import { IconBag, IconBuilding, IconCertificate, IconChevronUp, IconLock, IconShred, UPGRADE_ICONS } from "./Icons";
-
-export type SheetState = "collapsed" | "half" | "full";
-const NEXT_SHEET: Record<SheetState, SheetState> = { collapsed: "half", half: "full", full: "collapsed" };
+import { IconBag, IconBuilding, IconCertificate, IconLock, IconShred, UPGRADE_ICONS } from "./Icons";
 
 interface Props {
   snap: Snapshot;
   tab: UpgradeTab;
-  sheet: SheetState;
   onTab: (t: UpgradeTab) => void;
-  onSheet: (s: SheetState) => void;
   onBuy: (id: UpgradeId) => void;
   onBuyBags: () => void;
   onBuyTier: () => void;
@@ -24,16 +19,13 @@ interface Props {
 export default function UpgradePanel({
   snap,
   tab,
-  sheet,
   onTab,
-  onSheet,
   onBuy,
   onBuyBags,
   onBuyTier,
   onPrestige,
 }: Props) {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const drag = useRef<{ y: number; moved: boolean } | null>(null);
 
   const onTabKey = (e: React.KeyboardEvent, i: number) => {
     let next = -1;
@@ -47,52 +39,16 @@ export default function UpgradePanel({
     tabRefs.current[next]?.focus();
   };
 
-  // 핸들: 탭하면 접힘→절반→전체 순환, 위/아래로 밀면 펼치기/접기
-  const onHandleDown = (e: React.PointerEvent) => {
-    drag.current = { y: e.clientY, moved: false };
-  };
-  const onHandleUp = (e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    const dy = e.clientY - d.y;
-    if (Math.abs(dy) > 30) {
-      d.moved = true;
-      if (dy < 0) onSheet(sheet === "collapsed" ? "half" : "full");
-      else onSheet(sheet === "full" ? "half" : "collapsed");
-    }
-  };
-  const onHandleClick = () => {
-    if (drag.current?.moved) {
-      drag.current = null;
-      return;
-    }
-    drag.current = null;
-    onSheet(NEXT_SHEET[sheet]);
-  };
-
   const activeTab = TABS.find((t) => t.id === tab)!;
   const items = UPGRADES.filter((u) => u.tab === tab);
 
   return (
-    <section className="upgrades" data-sheet={sheet} aria-labelledby="upgrades-title">
+    <section className="upgrades" aria-labelledby="upgrades-title">
       <div className="upgrades__head">
         <h2 id="upgrades-title" className="section-title">
           업그레이드
         </h2>
         {snap.affordableCount > 0 && <span className="upgrades__badge">{snap.affordableCount}개 구매 가능</span>}
-        <button
-          type="button"
-          className="upgrades__handle"
-          aria-expanded={sheet !== "collapsed"}
-          aria-controls="upgrades-body"
-          aria-label={sheet === "full" ? "업그레이드 시트 접기" : "업그레이드 시트 펼치기"}
-          onPointerDown={onHandleDown}
-          onPointerUp={onHandleUp}
-          onClick={onHandleClick}
-        >
-          <span className="upgrades__grip" aria-hidden="true" />
-          <IconChevronUp className="upgrades__chev" />
-        </button>
       </div>
 
       <div id="upgrades-body" className="upgrades__body">

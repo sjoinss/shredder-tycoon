@@ -18,7 +18,7 @@ import {
 } from "@/game/data";
 import { SoundBoard } from "@/game/audio";
 import { GameEngine, type FeedBlock, type GameEvent } from "@/game/engine";
-import { formatDuration, formatWon } from "@/game/format";
+import { formatClock, formatDuration, formatWon } from "@/game/format";
 import { registerImageCanvas } from "@/game/render/docgen";
 import { ImagePaperError, MAX_IMAGES_AT_ONCE, makeImagePaper } from "@/game/render/imagepaper";
 import { settingsStore } from "@/game/settings";
@@ -26,11 +26,12 @@ import ActionBar from "./ActionBar";
 import OrdersBoard, { orderTitle } from "./OrdersBoard";
 import Workbench from "./Workbench";
 import Hud from "./Hud";
-import { IconAlert, IconCheck, IconCoin } from "./Icons";
+import { IconAlert, IconBolt, IconCheck, IconChevronUp, IconCoin, IconShred, IconTimer, IconTray } from "./Icons";
 import SettingsDialog from "./SettingsDialog";
 import ShredStage from "./ShredStage";
 import Tray from "./Tray";
-import UpgradePanel, { type SheetState } from "./UpgradePanel";
+import TrayDrawer from "./TrayDrawer";
+import UpgradePanel from "./UpgradePanel";
 import { useMediaQuery, useSettings, useSnapshot } from "./hooks";
 
 type ToastKind = "success" | "money" | "warn" | "error";
@@ -50,16 +51,28 @@ const FEED_FAIL: Partial<Record<NonNullable<FeedBlock>, string>> = {
 };
 const ANNOUNCE_GAP = 1500;
 
+/** 모바일 아래 탭 화면 */
+type View = "play" | "upgrades" | "orders";
+/** PC 오른쪽 칸 */
+type SidePanel = "tray" | "upgrades" | "orders";
+
 export default function Game() {
   const [engine] = useState(() => new GameEngine());
   const [sound] = useState(() => new SoundBoard(settingsStore.get()));
   const snap = useSnapshot(engine);
   const settings = useSettings();
-  // 넓은 화면은 의뢰 게시판을 오른쪽 업무 일지에, 좁은 화면은 본문에
-  const wide = useMediaQuery("(min-width: 1440px)");
+  // PC(≥1024): 업그레이드·요청은 오른쪽 접히는 칸, 트레이는 모바일처럼 아래 서랍
+  const desktop = useMediaQuery("(min-width: 1024px)");
+  /** 모바일 아래 탭: 파쇄기 / 업그레이드 / 요청 */
+  const [view, setView] = useState<View>("play");
+  const [trayOpen, setTrayOpen] = useState(false);
+  /** 크게 펼쳐 고치는 중인 서류 */
+  const [deskDocId, setDeskDocId] = useState<number | null>(null);
+  /** PC 오른쪽 칸: 어느 탭을 펼쳤는지, 접었는지 */
+  const [panel, setPanel] = useState<SidePanel>("tray");
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const [tab, setTab] = useState<UpgradeTab>("shredder");
-  const [sheet, setSheet] = useState<SheetState>("collapsed");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [announcement, setAnnouncement] = useState("");
@@ -189,19 +202,19 @@ export default function Game() {
           announce("봉투가 없어서 청소 담당이 통을 못 비워요");
           break;
         case "orderOffered":
-          announce(`새 의뢰: ${e.order.client}, ${orderTitle(e.order)}`);
+          announce(`새 요청: ${e.order.client}, ${orderTitle(e.order)}`);
           break;
         case "orderAccepted":
-          toast("success", `${e.order.client} 의뢰 시작: ${orderTitle(e.order)}`);
-          announce(`의뢰를 받았어요. ${orderTitle(e.order)}, ${formatDuration(e.order.time)} 안에`);
+          toast("success", `${e.order.client} 요청 시작: ${orderTitle(e.order)}`);
+          announce(`요청을 받았어요. ${orderTitle(e.order)}, ${formatDuration(e.order.time)} 안에`);
           break;
         case "orderDone":
-          toast("money", `의뢰 완료! ${e.order.client} +₩${formatWon(e.order.reward)} · 평판 +${e.order.rep}`, 4000);
-          announce(`의뢰 완료, ${formatWon(e.order.reward)}원, 평판 ${e.order.rep} 올랐어요`);
+          toast("money", `요청 완료! ${e.order.client} +₩${formatWon(e.order.reward)} · 평판 +${e.order.rep}`, 4000);
+          announce(`요청 완료, ${formatWon(e.order.reward)}원, 평판 ${e.order.rep} 올랐어요`);
           break;
         case "orderFailed":
-          toast("error", `${e.order.client} 의뢰를 못 끝냈어요 (평판 −${ORDERS.failRep})`);
-          announce(`의뢰 실패. 평판이 ${ORDERS.failRep} 내려갔어요`);
+          toast("error", `${e.order.client} 요청을 못 끝냈어요 (평판 −${ORDERS.failRep})`);
+          announce(`요청 실패. 평판이 ${ORDERS.failRep} 내려갔어요`);
           break;
         case "prestige":
           toast("success", `제${e.certificate.branch}호 파기 증명서 발급! 새 지점에서 수익 ×${branchMult(e.certificate.branch)}`, 6000);
@@ -222,8 +235,9 @@ export default function Game() {
           break;
         }
         case "hazardUnlocked":
-          toast("warn", `새 방해 요소: ${HAZARDS[e.kind].name} — ${HAZARDS[e.kind].tip}`, 6000);
-          announce(`새 방해 요소 등장: ${HAZARDS[e.kind].name}. ${HAZARDS[e.kind].tip}`);
+          // 자세한 설명은 처음 그 서류를 펼칠 때 한 번만 (작업대 튜토리얼)
+          toast("warn", `새 방해 요소 등장: ${HAZARDS[e.kind].name}`, 4000);
+          announce(`새 방해 요소 등장: ${HAZARDS[e.kind].name}`);
           break;
         case "actionFailed":
           toast("warn", e.reason);
@@ -322,10 +336,7 @@ export default function Game() {
     [engine, toast, announce],
   );
 
-  const selectTab = useCallback((t: UpgradeTab) => {
-    setTab(t);
-    setSheet((s) => (s === "collapsed" ? "half" : s));
-  }, []);
+  const selectTab = useCallback((t: UpgradeTab) => setTab(t), []);
 
   // 단축키: Space 투입, E 통 비우기(단계 진행), 1~4 탭 전환
   useEffect(() => {
@@ -349,7 +360,9 @@ export default function Game() {
         const t = TABS[Number(e.key) - 1];
         if (t) {
           setTab(t.id);
-          setSheet((s) => (s === "collapsed" ? "half" : s));
+          setView("upgrades");
+          setPanel("upgrades");
+          setPanelOpen(true);
         }
       }
     };
@@ -370,8 +383,135 @@ export default function Game() {
 
   const selected = snap.tray.find((d) => d.id === snap.selectedId) ?? null;
 
+  // 방해 요소가 남은 서류는 파쇄기 위 작업대에 바로 펼친다 (잼일 때는 걸린 종이를 만져야 하므로 접음)
+  // 방해 요소가 남은 서류는 슬롯 위에서 기다리고, 누르면(서류·정리하기 버튼·트레이) 크게 펼쳐 고친다.
+  // 다른 서류로 바뀌면 다시 접힌다 (펼친 서류 id로 기억). 잼일 때는 걸린 종이를 만져야 하므로 접음
+  const fixable = selected && selected.pendingCount > 0 && !snap.jam ? selected : null;
+  const desk =
+    fixable && deskDocId === fixable.id ? (
+      <Workbench
+        doc={fixable}
+        tools={snap.tools}
+        tier={snap.tier.index}
+        onTreat={(i, page) => engine.treatHazard(fixable.id, i, page)}
+        onClose={() => setDeskDocId(null)}
+      />
+    ) : null;
+  const fixHint =
+    fixable && !desk
+      ? fixable.hazards
+          .filter((h) => h.left > 0)
+          .map((h) => HAZARDS[h.kind].name)
+          .filter((n, i, a) => a.indexOf(n) === i)
+          .join(" · ")
+      : null;
+  const warnDocs = snap.tray.filter((d) => d.pendingCount > 0).length;
+  const order = snap.activeOrder;
+
+  const ordersBoard = (
+    <OrdersBoard
+      snap={snap}
+      onAccept={(id) => engine.acceptOrder(id)}
+      onDecline={(id) => engine.declineOrder(id)}
+      onAbandon={() => engine.abandonOrder()}
+    />
+  );
+  const ledger = (
+    <dl className="goals__ledger">
+      <div>
+        <dt>총 파쇄</dt>
+        <dd>{snap.totalShredded.toLocaleString("ko-KR")}장</dd>
+      </div>
+      <div>
+        <dt>평판</dt>
+        <dd>
+          {snap.reputation} (×{snap.bonusMult.toFixed(2)})
+        </dd>
+      </div>
+      {snap.branches > 0 && (
+        <div>
+          <dt>지점</dt>
+          <dd>{snap.branches + 1}호점</dd>
+        </div>
+      )}
+      <div>
+        <dt>총 수익</dt>
+        <dd>₩{formatWon(snap.totalEarned)}</dd>
+      </div>
+      <div>
+        <dt>컷 등급</dt>
+        <dd>{snap.tier.grade}</dd>
+      </div>
+      <div>
+        <dt>투입 용량</dt>
+        <dd>{snap.capacity}장</dd>
+      </div>
+      <div>
+        <dt>통 용량</dt>
+        <dd>{snap.binCapacity}장 분량</dd>
+      </div>
+      <div>
+        <dt>쓰레기 봉투</dt>
+        <dd>{snap.bags}장</dd>
+      </div>
+    </dl>
+  );
+
+  const tabs: { id: View; label: string; Icon: typeof IconShred; badge: string | null }[] = [
+    { id: "play", label: "파쇄기", Icon: IconShred, badge: warnDocs > 0 ? "!" : null },
+    { id: "upgrades", label: "업그레이드", Icon: IconBolt, badge: snap.affordableCount > 0 ? String(snap.affordableCount) : null },
+    {
+      id: "orders",
+      label: "요청",
+      Icon: IconTimer,
+      badge: order ? `${order.progress}/${order.count}` : snap.offers.length > 0 ? String(snap.offers.length) : null,
+    },
+  ];
+  const sideTabs: { id: SidePanel; label: string; Icon: typeof IconShred; badge: string | null }[] = [
+    { id: "tray", label: "서류", Icon: IconTray, badge: warnDocs > 0 ? String(warnDocs) : null },
+    ...tabs.filter((t): t is (typeof tabs)[number] & { id: SidePanel } => t.id !== "play"),
+  ];
+
+  const trayList = (
+    <Tray
+      tray={snap.tray}
+      selectedId={snap.selectedId}
+      batchIds={snap.batchIds}
+      slots={snap.traySlots}
+      arrivalLeft={snap.arrivalLeft}
+      onSelect={(id) => {
+        engine.select(id);
+        // 모바일은 서랍을 닫는다. 고칠 게 있는 서류면 바로 크게 펼친다
+        setTrayOpen(false);
+        if (snap.tray.find((d) => d.id === id)?.pendingCount) setDeskDocId(id);
+      }}
+      onImages={addImages}
+    />
+  );
+
+  const upgradePanel = (
+    <UpgradePanel
+      snap={snap}
+      tab={tab}
+      onTab={selectTab}
+      onBuy={buy}
+      onBuyBags={() => engine.buyBags()}
+      onBuyTier={() => engine.buyTier()}
+      onPrestige={() => engine.prestige()}
+    />
+  );
+  const ordersView = (
+    <section className="orders-view" aria-label="파쇄 요청과 업무 일지">
+      {ordersBoard}
+      <div className="orders-view__ledger">
+        <h2 className="section-title">업무 일지</h2>
+        {ledger}
+      </div>
+    </section>
+  );
+
   return (
-    <div className="app" data-reduce-motion={settings.reduceMotion || undefined}>
+    <div className="app" data-view={view} data-reduce-motion={settings.reduceMotion || undefined}>
       <Hud
         money={snap.money}
         incomePerSec={snap.incomePerSec}
@@ -380,7 +520,7 @@ export default function Game() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <main className="main">
+      <main className="play">
         {snap.loadError && (
           <section className="load-error" role="alert">
             <h2>저장 데이터를 불러오지 못했어요</h2>
@@ -396,43 +536,36 @@ export default function Game() {
             </div>
           </section>
         )}
-        <ShredStage engine={engine} settings={settings} snap={snap}>
-          <ol className="toasts" aria-hidden="true">
-            {toasts.map((t) => {
-              const Icon = TOAST_ICON[t.kind];
-              return (
-                <li key={t.id} className={`toast toast--${t.kind}`}>
-                  <Icon size={18} />
-                  {t.text}
-                </li>
-              );
-            })}
-          </ol>
-        </ShredStage>
-        <Tray
-          tray={snap.tray}
-          selectedId={snap.selectedId}
-          batchIds={snap.batchIds}
-          slots={snap.traySlots}
-          arrivalLeft={snap.arrivalLeft}
-          onSelect={(id) => engine.select(id)}
-          onImages={addImages}
+        <ShredStage
+          engine={engine}
+          settings={settings}
+          snap={snap}
+          desk={desk}
+          fixHint={fixHint}
+          onOpenDesk={() => fixable && setDeskDocId(fixable.id)}
+          topExtra={
+            desktop &&
+            order && (
+              <p className="order-pill">
+                <span className="sr-only">진행 중인 요청: </span>
+                <IconTimer size={13} />
+                {order.client} {order.progress}/{order.count} · {formatClock(order.left)}
+              </p>
+            )
+          }
         />
-        {selected && selected.pendingCount > 0 && (
-          <Workbench
-            doc={selected}
-            tools={snap.tools}
-            tier={snap.tier.index}
-            onTreat={(i, page) => engine.treatHazard(selected.id, i, page)}
-          />
-        )}
-        {!wide && (
-          <OrdersBoard
-            snap={snap}
-            onAccept={(id) => engine.acceptOrder(id)}
-            onDecline={(id) => engine.declineOrder(id)}
-            onAbandon={() => engine.abandonOrder()}
-          />
+        {/* 모바일: 아래 서랍 / PC: 오른쪽 칸의 서류 탭 */}
+        {!desktop && (
+          <TrayDrawer
+            open={trayOpen}
+            onOpen={setTrayOpen}
+            count={snap.tray.length}
+            slots={snap.traySlots}
+            warn={warnDocs}
+            arrivalLeft={snap.arrivalLeft}
+          >
+            {trayList}
+          </TrayDrawer>
         )}
         <ActionBar
           snap={snap}
@@ -446,69 +579,83 @@ export default function Game() {
         />
       </main>
 
-      <aside className="goals" aria-labelledby="goals-title">
-        <h2 id="goals-title" className="section-title">
-          업무 일지
-        </h2>
-        <dl className="goals__ledger">
-          <div>
-            <dt>총 파쇄</dt>
-            <dd>{snap.totalShredded.toLocaleString("ko-KR")}장</dd>
-          </div>
-          <div>
-            <dt>평판</dt>
-            <dd>
-              {snap.reputation} (×{snap.bonusMult.toFixed(2)})
-            </dd>
-          </div>
-          {snap.branches > 0 && (
-            <div>
-              <dt>지점</dt>
-              <dd>{snap.branches + 1}호점</dd>
+      {desktop ? (
+        // PC: 오른쪽 칸(서류·업그레이드·요청). 가장자리 가운데 화살표 손잡이로 통째로 접고 편다
+        <aside className="side" data-open={panelOpen || undefined} aria-label="서류, 업그레이드, 파쇄 요청">
+          <button
+            type="button"
+            className="side__handle"
+            aria-expanded={panelOpen}
+            aria-controls="side-body"
+            aria-label={panelOpen ? "오른쪽 칸 접기" : `오른쪽 칸 펼치기${warnDocs > 0 ? `, 처리할 서류 ${warnDocs}` : ""}`}
+            title={panelOpen ? "접기" : "펼치기"}
+            onClick={() => setPanelOpen((o) => !o)}
+          >
+            <IconChevronUp size={18} />
+            {!panelOpen && warnDocs > 0 && <span className="side__handle-dot" aria-hidden="true" />}
+          </button>
+          {panelOpen && (
+            <div id="side-body" className="side__body">
+              <div className="side__tabs" role="tablist" aria-label="오른쪽 칸">
+                {sideTabs.map(({ id, label, Icon, badge }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    className="side__tab"
+                    aria-selected={panel === id}
+                    aria-controls="side-panel"
+                    onClick={() => setPanel(id)}
+                  >
+                    <Icon size={18} />
+                    {label}
+                    {badge !== null && <span className="tabbar__badge">{badge}</span>}
+                  </button>
+                ))}
+              </div>
+              <div id="side-panel" className="side__panel" role="tabpanel">
+                {panel === "tray" ? trayList : panel === "upgrades" ? upgradePanel : ordersView}
+              </div>
             </div>
           )}
-          <div>
-            <dt>총 수익</dt>
-            <dd>₩{formatWon(snap.totalEarned)}</dd>
-          </div>
-          <div>
-            <dt>컷 등급</dt>
-            <dd>{snap.tier.grade}</dd>
-          </div>
-          <div>
-            <dt>투입 용량</dt>
-            <dd>{snap.capacity}장</dd>
-          </div>
-          <div>
-            <dt>통 용량</dt>
-            <dd>{snap.binCapacity}장 분량</dd>
-          </div>
-          <div>
-            <dt>쓰레기 봉투</dt>
-            <dd>{snap.bags}장</dd>
-          </div>
-        </dl>
-        {wide && (
-          <OrdersBoard
-          snap={snap}
-          onAccept={(id) => engine.acceptOrder(id)}
-          onDecline={(id) => engine.declineOrder(id)}
-          onAbandon={() => engine.abandonOrder()}
-        />
-        )}
-      </aside>
+        </aside>
+      ) : (
+        <>
+          {view === "upgrades" && <div className="side">{upgradePanel}</div>}
+          {view === "orders" && ordersView}
+        </>
+      )}
 
-      <UpgradePanel
-        snap={snap}
-        tab={tab}
-        sheet={sheet}
-        onTab={selectTab}
-        onSheet={setSheet}
-        onBuy={buy}
-        onBuyBags={() => engine.buyBags()}
-        onBuyTier={() => engine.buyTier()}
-        onPrestige={() => engine.prestige()}
-      />
+      {!desktop && (
+        <nav className="tabbar" aria-label="화면 전환">
+          {tabs.map(({ id, label, Icon, badge }) => (
+            <button
+              key={id}
+              type="button"
+              className="tabbar__btn"
+              aria-current={view === id ? "page" : undefined}
+              onClick={() => setView(id)}
+            >
+              <Icon size={22} />
+              <span>{label}</span>
+              {badge !== null && <span className="tabbar__badge">{badge}</span>}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* 알림은 어느 화면(파쇄기·업그레이드·요청)에서도 보이게 앱 위에 띄운다 */}
+      <ol className="toasts" aria-hidden="true">
+        {toasts.map((t) => {
+          const Icon = TOAST_ICON[t.kind];
+          return (
+            <li key={t.id} className={`toast toast--${t.kind}`}>
+              <Icon size={18} />
+              {t.text}
+            </li>
+          );
+        })}
+      </ol>
 
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {announcement}

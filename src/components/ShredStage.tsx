@@ -1,13 +1,13 @@
 "use client";
 
 import { capturePointer } from "./hooks";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BIN } from "@/game/data";
 import type { GameEngine, Snapshot } from "@/game/engine";
 import { formatSeconds } from "@/game/format";
 import { StageRenderer, type StageColors } from "@/game/render/stage";
 import type { Settings } from "@/game/settings";
-import { IconBin, IconHeat } from "./Icons";
+import { IconAlert, IconBin, IconHeat } from "./Icons";
 
 function readColors(): StageColors {
   const css = getComputedStyle(document.documentElement);
@@ -63,9 +63,9 @@ function Gauge({
       aria-valuenow={p}
       aria-valuetext={`${p}%${note ? `, ${note}` : ""}`}
     >
-      <span className="gauge__label">
+      <span className="gauge__label" aria-hidden="true">
         {icon}
-        {label}
+        <span className="gauge__label-text">{label}</span>
       </span>
       <span className="gauge__track" aria-hidden="true">
         <span className="gauge__fill" style={{ width: `${p}%` }} />
@@ -77,16 +77,34 @@ function Gauge({
   );
 }
 
+/** 윗줄(상태·계기판) 높이: 작업대는 그 아래부터 */
+const TOP_BAR = 42;
+
 interface Props {
   engine: GameEngine;
   settings: Settings;
   snap: Snapshot;
   /** 스테이지 위에 겹쳐 보일 알림 (토스트) */
   children?: React.ReactNode;
+  /** 윗줄 오른쪽 끝에 붙는 것 (진행 중인 요청) */
+  topExtra?: React.ReactNode;
+  /** 크게 펼친 서류 정리 화면 (파쇄기 위에 팝업처럼) */
+  desk?: React.ReactNode;
+  /** 슬롯 위 서류에 고칠 게 있으면 그 이름들 (정리하기 버튼) */
+  fixHint?: string | null;
+  /** 정리하기 버튼이나 슬롯 위 서류를 눌렀을 때 */
+  onOpenDesk?: () => void;
 }
 
-export default function ShredStage({ engine, settings, snap, children }: Props) {
+export default function ShredStage({ engine, settings, snap, children, topExtra, desk, fixHint, onOpenDesk }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  /** 파쇄기 윗면 y: 작업대는 그 위 공간만 쓴다 */
+  const [headTop, setHeadTop] = useState(0);
+  // 캔버스 이벤트 핸들러가 최신 콜백을 부르도록 (고칠 게 없으면 null)
+  const openDeskRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    openDeskRef.current = fixHint ? (onOpenDesk ?? null) : null;
+  });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<StageRenderer | null>(null);
 
@@ -100,7 +118,10 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
 
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) renderer.resize(width, height);
+      if (width > 0 && height > 0) {
+        renderer.resize(width, height);
+        setHeadTop(renderer.headTop);
+      }
     });
     ro.observe(wrap);
 
@@ -116,12 +137,12 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
       if (renderer.pointerDown(x, y)) {
         capturePointer(canvas, e.pointerId);
         e.preventDefault();
-      }
+      } else if (renderer.hoverHit(x, y)) openDeskRef.current?.();
     };
     const move = (e: PointerEvent) => {
       const [x, y] = pos(e);
       renderer.pointerMove(x, y);
-      canvas.style.cursor = renderer.hitTest(x, y) ? "grab" : "";
+      canvas.style.cursor = renderer.hitTest(x, y) ? "grab" : renderer.hoverHit(x, y) && openDeskRef.current ? "pointer" : "";
     };
     const up = () => renderer.pointerUp();
     canvas.addEventListener("pointerdown", down);
@@ -179,6 +200,10 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
     rendererRef.current?.setLowPower(settings.lowPower);
   }, [settings.lowPower]);
 
+  useEffect(() => {
+    rendererRef.current?.setHoverHidden(!!desk);
+  }, [desk]);
+
   const status = statusOf(snap);
   const heatLevel = snap.overheated || snap.heat >= 90 ? "danger" : snap.heat >= 70 ? "warn" : "ok";
   const heatNote = snap.overheated ? "과열" : snap.heatPenalty ? "급가동" : snap.heat >= 70 ? "뜨거움" : null;
@@ -198,14 +223,25 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
           style={{ touchAction: interactive ? "none" : "auto" }}
         />
       </div>
-      <p className={`stage__status stage__status--${status.tone}`}>
-        <span className="stage__led" aria-hidden="true" />
-        <span>{status.text}</span>
-      </p>
-      <div className="gauges">
-        <Gauge icon={<IconHeat size={16} />} label="열" percent={snap.heat} level={heatLevel} note={heatNote} />
-        <Gauge icon={<IconBin size={16} />} label="통" percent={binPct} level={binLevel} note={binNote} />
+      <div className="stage__top">
+        <p className={`stage__status stage__status--${status.tone}`}>
+          <span className="stage__led" aria-hidden="true" />
+          <span>{status.text}</span>
+        </p>
+        <div className="gauges">
+          <Gauge icon={<IconHeat size={14} />} label="열" percent={snap.heat} level={heatLevel} note={heatNote} />
+          <Gauge icon={<IconBin size={14} />} label="통" percent={binPct} level={binLevel} note={binNote} />
+        </div>
+        {topExtra}
       </div>
+      {fixHint && headTop > 0 && (
+        <button type="button" className="fix-hint" style={{ top: Math.max(TOP_BAR, headTop - 46) }} onClick={onOpenDesk}>
+          <IconAlert size={16} />
+          <span>{fixHint}</span>
+          <strong>정리하기</strong>
+        </button>
+      )}
+      {desk && <div className="stage__desk">{desk}</div>}
       {children}
     </section>
   );

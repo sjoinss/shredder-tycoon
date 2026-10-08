@@ -5,7 +5,7 @@ import "@/styles/layout.css";
 import "@/styles/components.css";
 
 export const metadata: Metadata = {
-  title: "슈레더 타이쿤",
+  title: "파쇄 시뮬레이터",
   description: "서류를 파쇄해 돈을 벌고 파쇄기를 업그레이드하는 사무실 시뮬레이터",
 };
 

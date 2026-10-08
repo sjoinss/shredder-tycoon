@@ -167,6 +167,24 @@ export class StageRenderer {
     this.colors = c;
   }
 
+  /** 파쇄기 본체 윗면 y (CSS px) — 작업대 오버레이가 이 위 공간을 쓴다 */
+  get headTop() {
+    return this.sized ? this.g.topY : 0;
+  }
+
+  /** 슬롯 위에 대기 중인 서류(맨 앞 장)를 눌렀는지 */
+  hoverHit(x: number, y: number) {
+    const r = this.hoverRect;
+    return !!r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+  }
+  private hoverRect: { x: number; y: number; w: number; h: number } | null = null;
+
+  /** 작업대가 열려 있으면 슬롯 위에 대기 중인 서류는 그리지 않는다 (작업대에 크게 보이므로) */
+  private hoverHidden = false;
+  setHoverHidden(on: boolean) {
+    this.hoverHidden = on;
+  }
+
   /** 저사양 모드: 픽셀 밀도 1배, 떨어지는 조각 수↓, 김·불꽃 생략 */
   private lowPower = false;
   setLowPower(on: boolean) {
@@ -213,8 +231,9 @@ export class StageRenderer {
     const hw = Math.max(180, Math.min(W * 0.62, 380, H * 0.95));
     const hh = hw * 0.3;
     const lidH = hh * 0.3;
-    const binH = Math.max(90, H * 0.34);
-    const topY = Math.min(H * 0.44, H - hh - binH - 10);
+    // 위쪽(대기 서류·작업대) 공간을 넉넉히: 통은 조금 낮아도 더미가 잘 보인다
+    const binH = Math.max(90, H * 0.28);
+    const topY = Math.min(H * 0.52, H - hh - binH - 10);
     const hx = (W - hw) / 2;
     // 전용 슬롯이 있는 본체: 종이 슬롯을 왼쪽으로 줄이고 오른쪽에 카드/CD 슬롯
     const hasSlot = this.engine.tier.slot;
@@ -910,6 +929,8 @@ export class StageRenderer {
     let bottom = 0;
     let alpha = 1;
     const jam = engine.current?.jam ?? null;
+    let hovering = false;
+    this.hoverRect = null;
 
     if (this.feeds.length && engine.current) {
       const p = Math.min(1, engine.current.elapsed / engine.current.duration);
@@ -920,7 +941,7 @@ export class StageRenderer {
         return { doc: f.doc, canvas: f.canvas, x: f.x, w: f.docW * g.scale, h, dy: f.dy + p * h - back };
       });
       bottom = g.slotY;
-    } else if (engine.phase !== "shredding" && !engine.emptyStep) {
+    } else if (engine.phase !== "shredding" && !engine.emptyStep && !this.hoverHidden) {
       const batch = engine.batch();
       if (!batch.length) {
         this.hoverKey = "";
@@ -948,8 +969,13 @@ export class StageRenderer {
       const bob = this.motion.reduced ? 0 : Math.sin(this.time * 2.2) * 2;
       bottom = g.slotY - 6 - (1 - this.hoverAlpha) * 14 + bob;
       alpha = this.hoverAlpha;
+      hovering = true;
     }
     if (!items.length) return;
+    if (hovering) {
+      const f = items[0];
+      this.hoverRect = { x: f.x, y: bottom - f.h + f.dy, w: f.w, h: f.h };
+    }
 
     ctx.save();
     ctx.beginPath();

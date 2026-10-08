@@ -28,7 +28,7 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
     <section className="orders" aria-labelledby="orders-title">
       <div className="orders__head">
         <h2 id="orders-title" className="section-title">
-          의뢰 게시판
+          파쇄 요청
         </h2>
         <span className="orders__rep">
           평판 {snap.reputation} · 수익 ×{snap.bonusMult.toFixed(2)}
@@ -37,12 +37,12 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
 
       {!snap.ordersUnlocked ? (
         <p className="postit">
-          누적 {ORDERS.unlockAt}장을 갈면 거래처 의뢰가 들어와요. (지금 {snap.totalShredded}장)
+          누적 {ORDERS.unlockAt}장을 갈면 다른 팀에서 파쇄 요청이 들어와요. (지금 {snap.totalShredded}장)
         </p>
       ) : (
         <>
           {a && (
-            <article className="order order--active" aria-label={`진행 중인 의뢰: ${a.client}`}>
+            <article className="order order--active" aria-label={`진행 중인 요청: ${a.client}`}>
               <div className="order__top">
                 <strong className="order__client">{a.client}</strong>
                 <span className={`order__time${a.left < 30 ? " is-urgent" : ""}`}>
@@ -56,7 +56,7 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
               <div
                 className="order__bar"
                 role="progressbar"
-                aria-label="의뢰 진행"
+                aria-label="요청 진행"
                 aria-valuemin={0}
                 aria-valuemax={a.count}
                 aria-valuenow={a.progress}
@@ -78,7 +78,7 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
           )}
 
           {snap.offers.length === 0 ? (
-            !a && <p className="orders__empty">새 의뢰를 기다리는 중이에요.</p>
+            !a && <p className="orders__empty">새 요청을 기다리는 중이에요.</p>
           ) : (
             <ul className="orders__list">
               {snap.offers.map((o) => (
@@ -100,7 +100,7 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
                       className="order__btn order__btn--accept"
                       aria-disabled={!!a}
                       onClick={() => onAccept(o.id)}
-                      aria-label={`${o.client} 의뢰 받기: ${orderTitle(o)}${a ? " (진행 중인 의뢰를 먼저 끝내세요)" : ""}`}
+                      aria-label={`${o.client} 요청 받기: ${orderTitle(o)}${a ? " (진행 중인 요청을 먼저 끝내세요)" : ""}`}
                     >
                       <IconCheck size={16} />
                       받기
@@ -109,7 +109,7 @@ export default function OrdersBoard({ snap, onAccept, onDecline, onAbandon }: Pr
                       type="button"
                       className="order__btn"
                       onClick={() => onDecline(o.id)}
-                      aria-label={`${o.client} 의뢰 거절`}
+                      aria-label={`${o.client} 요청 거절`}
                     >
                       <IconClose size={16} />
                     </button>

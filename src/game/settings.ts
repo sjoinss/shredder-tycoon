@@ -9,6 +9,8 @@ export interface Settings {
   screenShake: boolean;
   /** 저사양 모드: 화질·효과를 줄여 느린 기기에서도 부드럽게 */
   lowPower: boolean;
+  /** 이미 설명을 본 방해 요소 (처음 만날 때 한 번만 튜토리얼) */
+  seenTips: string[];
   /** 내 이미지: 맞춤(여백) / 꽉 채움 */
   imageFit: "contain" | "cover";
   /** 내 이미지: 프린트된 종이 느낌 */
@@ -38,6 +40,7 @@ function defaults(): Settings {
     reduceMotion: !!prefersReducedMotion(),
     screenShake: true,
     // 코어가 아주 적은 기기는 처음부터 켬
+    seenTips: [],
     lowPower: typeof navigator !== "undefined" && (navigator.hardwareConcurrency ?? 8) <= 2,
     imageFit: "contain",
     imagePrint: true,
@@ -59,6 +62,7 @@ function load(): Settings {
       if (typeof raw.reduceMotion === "boolean") s.reduceMotion = raw.reduceMotion;
       if (typeof raw.screenShake === "boolean") s.screenShake = raw.screenShake;
       if (typeof raw.lowPower === "boolean") s.lowPower = raw.lowPower;
+      if (Array.isArray(raw.seenTips)) s.seenTips = raw.seenTips.filter((k: unknown) => typeof k === "string").slice(0, 50);
       if (raw.imageFit === "contain" || raw.imageFit === "cover") s.imageFit = raw.imageFit;
       if (typeof raw.imagePrint === "boolean") s.imagePrint = raw.imagePrint;
     }

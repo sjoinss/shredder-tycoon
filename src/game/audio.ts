@@ -309,7 +309,7 @@ export class SoundBoard {
     this.tone(880, t + 0.11, 0.16, "triangle", 0.15);
   }
 
-  /** 의뢰 완료·본체 교체(짧게), 지점 확장(길게) */
+  /** 요청 완료·본체 교체(짧게), 지점 확장(길게) */
   private fanfare(long: boolean) {
     if (!this.ready) return;
     const t = this.ctx!.currentTime + 0.05;

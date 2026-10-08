@@ -1,7 +1,7 @@
 import {
   ALBUM,
   BIN,
-  CLIENTS,
+  REQUESTERS,
   FEEDER_HEAT_LIMIT,
   JANITOR_SHARE,
   OFFLINE,
@@ -623,7 +623,7 @@ export class GameEngine {
     }
   }
 
-  // ---------- 의뢰 ----------
+  // ---------- 요청 ----------
   private offerTimer = 0;
 
   ordersUnlocked() {
@@ -682,7 +682,7 @@ export class GameEngine {
     const value = template === null ? 11 : TEMPLATES[template].baseValue;
     return {
       id: d.orders.nextId++,
-      client: rng.pick(CLIENTS),
+      client: rng.pick(REQUESTERS),
       template,
       count,
       minTier,
@@ -697,14 +697,14 @@ export class GameEngine {
   acceptOrder(id: number) {
     const o = this.data.orders;
     if (this.loadError) return false;
-    if (o.active) return this.fail("이미 진행 중인 의뢰가 있어요");
+    if (o.active) return this.fail("이미 진행 중인 요청이 있어요");
     const order = o.offers.find((x) => x.id === id);
     if (!order) return false;
     o.offers = o.offers.filter((x) => x !== order);
     order.left = order.time;
     order.progress = 0;
     o.active = order;
-    // 받은 자리는 곧 새 의뢰로 채운다
+    // 받은 자리는 곧 새 요청으로 채운다
     this.offerTimer = Math.min(this.offerTimer, ORDERS.offerEvery / 3);
     this.emit({ type: "orderAccepted", order });
     this.emitChange();
@@ -718,7 +718,7 @@ export class GameEngine {
     this.emitChange();
   }
 
-  /** 진행 중인 의뢰 포기 (평판이 깎인다) */
+  /** 진행 중인 요청 포기 (평판이 깎인다) */
   abandonOrder() {
     const a = this.data.orders.active;
     if (!a) return;
