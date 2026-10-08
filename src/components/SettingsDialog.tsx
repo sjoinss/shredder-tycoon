@@ -127,6 +127,13 @@ export default function SettingsDialog({ open, settings, onClose, onReset }: Pro
             />
             파쇄 중 흔들림
           </label>
+          <label className="check-row">
+            <input type="checkbox" checked={settings.lowPower} onChange={(e) => set({ lowPower: e.target.checked })} />
+            저사양 모드
+          </label>
+          <p className="settings__note">
+            화면이 끊기면 켜 보세요. 화질을 낮추고 떨어지는 조각·김·불꽃을 줄여요. 게임 진행은 똑같아요.
+          </p>
         </fieldset>
 
         <fieldset className="settings__group">

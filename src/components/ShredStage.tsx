@@ -129,19 +129,28 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
 
+    // 스크롤해서 파쇄기가 화면 밖이면 그리기만 쉰다 (게임은 계속 진행)
+    let visible = true;
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+    });
+    io.observe(wrap);
+
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       engine.update(dt);
-      renderer.frame(dt);
+      // 조각은 진행도 기준으로 만들어지므로 쉬었다 다시 그려도 빠짐없이 따라잡는다
+      if (visible) renderer.frame(dt);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(raf);
+      io.disconnect();
       ro.disconnect();
       off();
       canvas.removeEventListener("pointerdown", down);
@@ -165,6 +174,10 @@ export default function ShredStage({ engine, settings, snap, children }: Props) 
   useEffect(() => {
     rendererRef.current?.setMotion({ reduced: settings.reduceMotion, shake: settings.screenShake });
   }, [settings.reduceMotion, settings.screenShake]);
+
+  useEffect(() => {
+    rendererRef.current?.setLowPower(settings.lowPower);
+  }, [settings.lowPower]);
 
   const status = statusOf(snap);
   const heatLevel = snap.overheated || snap.heat >= 90 ? "danger" : snap.heat >= 70 ? "warn" : "ok";

@@ -99,6 +99,8 @@ type Drag =
   | { kind: "sweep"; lx: number; ly: number; dist: number };
 
 const MAX_PIECES = 450;
+/** 저사양 모드: 동시에 떨어지는 조각 수 (넘치는 조각은 바로 더미에 쌓임) */
+const LOW_MAX_PIECES = 120;
 const MAX_PUFFS = 40;
 const GRAVITY = 900;
 const MAX_FALL = 360;
@@ -165,12 +167,25 @@ export class StageRenderer {
     this.colors = c;
   }
 
+  /** 저사양 모드: 픽셀 밀도 1배, 떨어지는 조각 수↓, 김·불꽃 생략 */
+  private lowPower = false;
+  setLowPower(on: boolean) {
+    if (this.lowPower === on) return;
+    this.lowPower = on;
+    this.pool.limit = on ? LOW_MAX_PIECES : MAX_PIECES;
+    if (on) {
+      this.puffs = [];
+      this.sparks = [];
+    }
+    if (this.sized) this.resize(this.W, this.H);
+  }
+
   setMotion(m: MotionPrefs) {
     this.motion = m;
   }
 
   resize(cssW: number, cssH: number) {
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.dpr = Math.min(this.lowPower ? 1 : 2, window.devicePixelRatio || 1);
     this.W = cssW;
     this.H = cssH;
     this.canvas.width = Math.round(cssW * this.dpr);
@@ -662,7 +677,7 @@ export class StageRenderer {
 
   /** 잼 순간 슬롯에서 튀는 불꽃 (움직임 줄이기 시 생략) */
   private burstSparks(n: number) {
-    if (this.motion.reduced) return;
+    if (this.motion.reduced || this.lowPower) return;
     const g = this.g;
     for (let i = 0; i < n; i++) {
       this.sparks.push({
@@ -710,7 +725,7 @@ export class StageRenderer {
     const steaming = engine.data.overheated || engine.data.heat >= 92;
     if (steaming && !this.motion.reduced) {
       this.puffTimer -= dt;
-      if (this.puffTimer <= 0 && this.puffs.length < MAX_PUFFS) {
+      if (this.puffTimer <= 0 && this.puffs.length < MAX_PUFFS && !this.lowPower) {
         this.puffTimer = engine.data.overheated ? 0.07 : 0.18;
         const fromSlot = Math.random() < 0.6;
         this.puffs.push({

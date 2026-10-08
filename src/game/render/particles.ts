@@ -22,7 +22,8 @@ export class PiecePool {
   readonly active: Piece[] = [];
   private free: Piece[] = [];
 
-  constructor(readonly limit: number) {}
+  /** 저사양 모드에서 낮춘다 (이미 떠 있는 조각은 그대로 둠) */
+  constructor(public limit: number) {}
 
   get full() {
     return this.active.length >= this.limit;

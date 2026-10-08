@@ -1615,7 +1615,8 @@ kbd {
   color: var(--color-error);
   font-weight: 800;
 }
-[data-theme="night"] .order__time.is-urgent {
+[data-theme="night"] .order__time.is-urgent,
+[data-theme="night"] .order__warn {
   color: #f19d95;
 }
 .order__title {
@@ -1695,7 +1696,7 @@ kbd {
 }
 .buy-btn.is-confirm {
   background: var(--color-stamp);
-  color: #fff;
+  color: var(--color-on-status);
 }
 .certs {
   margin-top: 6px;
@@ -1705,7 +1706,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 32px;
+  min-height: var(--touch-target);
   font-weight: 800;
   cursor: pointer;
 }

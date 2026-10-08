@@ -374,7 +374,12 @@ export class GameEngine {
     }
     this.arrivalLeft = arrivalInterval(this.data.levels.inbox);
     this.selectedId = this.data.tray[0]?.id ?? null;
-    if (result.ok && !result.fresh) this.applyOffline();
+    if (result.ok && !result.fresh) {
+      this.applyOffline();
+      // 바로 새로고침해도 같은 시간을 두 번 계산하지 않게 기준 시각을 지금으로
+      this.data.lastSeen = Date.now();
+      this.save();
+    }
   }
 
   // ---------- 파쇄기 본체 ----------
@@ -479,7 +484,7 @@ export class GameEngine {
     if (this.phase === "shredding" && c) {
       d.heat += c.jam ? JAM.heatPerSec * dt : (c.heat * dt) / c.duration;
     }
-    const cool = coolRate(d.levels.fan) * (this.phase === "shredding" ? HEAT.shreddingCool : 1);
+    const cool = coolRate(d.levels.fan) * this.tier.cool * (this.phase === "shredding" ? HEAT.shreddingCool : 1);
     d.heat = Math.min(100, Math.max(0, d.heat - cool * dt));
     if (c?.jam && d.heat >= 100 && !d.overheated) {
       d.overheated = true;
@@ -672,7 +677,8 @@ export class GameEngine {
     const share =
       template === null ? ids.filter((id) => !TEMPLATES[id].slot).reduce((sum, id) => sum + weight(id), 0) / total : weight(template) / total;
     const arrival = arrivalInterval(d.levels.inbox) / share;
-    const time = Math.round(Math.max(90, count * Math.max(perSheet, arrival) * 1.5) / 10) * 10;
+    // 사람은 방해 요소도 처리하고 통도 비우므로 넉넉하게
+    const time = Math.round(Math.max(120, count * Math.max(perSheet, arrival) * 2.2) / 10) * 10;
     const value = template === null ? 11 : TEMPLATES[template].baseValue;
     return {
       id: d.orders.nextId++,
@@ -775,6 +781,17 @@ export class GameEngine {
     const byShred = (perDoc * cap) / cycle;
     const byArrival = perDoc / arrivalInterval(d.levels.inbox);
     return Math.min(byShred, byArrival) * OFFLINE.efficiency;
+  }
+
+  /**
+   * 자리를 비운 시간만큼 급지 담당 수익을 준다. 불러올 때, 그리고 숨겨졌던 탭이 다시 보일 때
+   * (탭이 숨으면 브라우저가 게임 루프를 멈추므로) 부른다.
+   */
+  catchUp() {
+    if (this.loadError) return;
+    this.applyOffline();
+    this.data.lastSeen = Date.now();
+    this.emitChange();
   }
 
   private applyOffline() {
@@ -884,7 +901,7 @@ export class GameEngine {
     }
     const thickness = docs.reduce((s, d) => s + TEMPLATES[d.template].thickness * docSheets(d), 0);
     const heat =
-      thickness *
+      Math.pow(thickness, HEAT.batchExp) *
       HEAT.perSheet *
       CUT_GRADES[this.grade].heat *
       this.tier.heat *
@@ -1473,7 +1490,7 @@ export class GameEngine {
       heat: d.heat,
       overheated: d.overheated,
       heatPenalty: this.heatPenalty,
-      coolEta: d.overheated ? Math.max(0, d.heat - HEAT.resumeAt) / coolRate(d.levels.fan) : 0,
+      coolEta: d.overheated ? Math.max(0, d.heat - HEAT.resumeAt) / (coolRate(d.levels.fan) * this.tier.cool) : 0,
       canEarlyRestart: d.overheated && d.heat <= HEAT.earlyAt,
       binFill: d.binFill,
       binCapacity: this.binCap(),

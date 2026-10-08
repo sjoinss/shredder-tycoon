@@ -1,3 +1,4 @@
+import { TEMPLATES } from "./data";
 import type { GameEvent } from "./engine";
 import type { Settings } from "./settings";
 
@@ -26,7 +27,14 @@ export class SoundBoard {
       const ctx = new Ctor();
       this.ctx = ctx;
       this.master = ctx.createGain();
-      this.master.connect(ctx.destination);
+      // 여러 소리가 한꺼번에 겹쳐도(자동 급지·동전·도착음) 찢어지지 않게 마지막에 압축
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -14;
+      limiter.knee.value = 8;
+      limiter.ratio.value = 6;
+      limiter.attack.value = 0.004;
+      limiter.release.value = 0.2;
+      this.master.connect(limiter).connect(ctx.destination);
       this.sfx = ctx.createGain();
       this.sfx.connect(this.master);
       this.motorBus = ctx.createGain();
@@ -52,22 +60,58 @@ export class SoundBoard {
     return this.ctx && this.ctx.state === "running" && !this.settings.muted;
   }
 
+  private lastPlayed = new Map<string, number>();
+  /** 같은 소리가 너무 촘촘히 겹치지 않게: gap초 안에 다시 부르면 건너뜀 */
+  private gate(key: string, gap: number) {
+    const now = this.ctx?.currentTime ?? 0;
+    const last = this.lastPlayed.get(key) ?? -1;
+    if (now - last < gap) return false;
+    this.lastPlayed.set(key, now);
+    return true;
+  }
+
+  /** 탭이 숨으면 오디오 처리도 쉰다 (배터리·저사양) */
+  suspend() {
+    if (this.ctx?.state === "running") void this.ctx.suspend();
+  }
+
+  resume() {
+    if (this.ctx?.state === "suspended") void this.ctx.resume();
+  }
+
   handleEvent(e: GameEvent, speedFactor: number) {
     switch (e.type) {
       case "shredStart":
-        this.motorStart(speedFactor, e.duration);
+        // 카드·CD는 낮고 거친 소리로 갈린다
+        this.motorStart(speedFactor, e.duration, e.docs.some((d) => TEMPLATES[d.template].slot));
         break;
       case "shredDone":
         this.motorStop();
         this.coin(e.docs.some((d) => d.rarity !== null));
         break;
       case "arrive":
-        this.paperSlide();
+        if (this.gate("arrive", 0.25)) this.paperSlide();
         break;
       case "buy":
       case "buyBags":
+        this.purchase();
+        break;
       case "tierUp":
         this.purchase();
+        this.fanfare(false);
+        break;
+      case "orderAccepted":
+        this.click();
+        break;
+      case "orderDone":
+        this.fanfare(false);
+        break;
+      case "orderFailed":
+      case "janitorNoBags":
+        this.error();
+        break;
+      case "prestige":
+        this.fanfare(true);
         break;
       case "overheat":
         this.overheatBeeps();
@@ -139,7 +183,7 @@ export class SoundBoard {
   }
 
   // ---------- 모터 + 종이 먹는 소리 ----------
-  private motorStart(speedFactor: number, duration: number) {
+  private motorStart(speedFactor: number, duration: number, hard = false) {
     if (!this.ready) return;
     this.motorStop(true);
     const ctx = this.ctx!;
@@ -154,7 +198,7 @@ export class SoundBoard {
     lp.frequency.value = 520;
     lp.connect(out);
 
-    const pitch = 62 * speedFactor;
+    const pitch = 62 * speedFactor * (hard ? 0.7 : 1);
     const osc = ctx.createOscillator();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(pitch * 0.45, t);
@@ -174,15 +218,15 @@ export class SoundBoard {
     chew.loop = true;
     const bp = ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 2400;
+    bp.frequency.value = hard ? 1100 : 2400;
     bp.Q.value = 0.9;
     const chewGain = ctx.createGain();
     chewGain.gain.value = 0;
     const lfo = ctx.createOscillator();
     lfo.type = "square";
-    lfo.frequency.value = 11 * speedFactor;
+    lfo.frequency.value = (hard ? 6 : 11) * speedFactor;
     const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = 0.22;
+    lfoDepth.gain.value = hard ? 0.34 : 0.22;
     lfo.connect(lfoDepth).connect(chewGain.gain);
     chew.connect(bp).connect(chewGain).connect(out);
 
@@ -244,7 +288,8 @@ export class SoundBoard {
   }
 
   coin(big = false) {
-    if (!this.ready) return;
+    // 자동 급지로 연달아 들어와도 동전 소리가 겹겹이 쌓이지 않게
+    if (!this.ready || (!big && !this.gate("coin", 0.12))) return;
     const t = this.ctx!.currentTime + 0.05;
     this.tone(988, t, 0.09, "sine", 0.18);
     this.tone(1319, t + 0.07, big ? 0.35 : 0.18, "sine", 0.18);
@@ -264,8 +309,16 @@ export class SoundBoard {
     this.tone(880, t + 0.11, 0.16, "triangle", 0.15);
   }
 
-  click() {
+  /** 의뢰 완료·본체 교체(짧게), 지점 확장(길게) */
+  private fanfare(long: boolean) {
     if (!this.ready) return;
+    const t = this.ctx!.currentTime + 0.05;
+    const notes = long ? [523, 659, 784, 1047, 1319] : [659, 784, 1047];
+    notes.forEach((f, i) => this.tone(f, t + i * 0.09, 0.22 + (i === notes.length - 1 ? 0.3 : 0), "triangle", 0.13));
+  }
+
+  click() {
+    if (!this.ready || !this.gate("click", 0.03)) return;
     this.tone(1400, this.ctx!.currentTime, 0.03, "square", 0.04);
   }
 
@@ -377,7 +430,7 @@ export class SoundBoard {
   }
 
   private hazardSound(kind: string, done: boolean) {
-    if (!this.ready) return;
+    if (!this.ready || !this.gate("hazard", 0.04)) return;
     const t = this.ctx!.currentTime;
     switch (kind) {
       case "crumple":

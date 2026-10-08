@@ -249,26 +249,36 @@ export default function Game() {
     });
   }, [engine, sound, toast, announce]);
 
-  // 자리를 비운 동안 급지 담당이 번 돈 (불러올 때 한 번만)
-  useEffect(() => {
+  // 자리를 비운 동안 급지 담당이 번 돈: 불러올 때, 그리고 숨겨졌던 탭으로 돌아왔을 때
+  const reportOffline = useCallback(() => {
     const r = engine.takeOfflineReport();
     if (!r) return;
     const msg = `자리를 비운 ${formatDuration(r.seconds)} 동안 급지 담당이 ₩${formatWon(r.reward)} 벌었어요${r.capped ? " (최대 시간까지만)" : ""}`;
     toast("money", msg, 6000);
     announce(msg);
   }, [engine, toast, announce]);
+  useEffect(reportOffline, [reportOffline]);
 
-  // 페이지를 떠날 때 저장
+  // 페이지를 떠날 때 저장 (숨길 때 저장한 시각이 돌아왔을 때 계산의 기준)
   useEffect(() => {
     const save = () => engine.save();
-    const onVis = () => document.visibilityState === "hidden" && save();
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        save();
+        sound.suspend();
+      } else {
+        sound.resume();
+        engine.catchUp();
+        reportOffline();
+      }
+    };
     window.addEventListener("pagehide", save);
     document.addEventListener("visibilitychange", onVis);
     return () => {
       window.removeEventListener("pagehide", save);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [engine]);
+  }, [engine, sound, reportOffline]);
 
   const feed = useCallback(() => {
     const block = engine.feedBlock();
@@ -412,6 +422,7 @@ export default function Game() {
           <Workbench
             doc={selected}
             tools={snap.tools}
+            tier={snap.tier.index}
             onTreat={(i, page) => engine.treatHazard(selected.id, i, page)}
           />
         )}

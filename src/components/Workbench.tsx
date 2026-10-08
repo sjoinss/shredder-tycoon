@@ -2,7 +2,7 @@
 
 import { capturePointer } from "./hooks";
 import { useEffect, useRef, useState } from "react";
-import { CONTAINER_KINDS, ENVELOPE_OPENED, HAZARDS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, TORN_MULT, tapeCuts } from "@/game/data";
+import { CONTAINER_KINDS, ENVELOPE_OPENED, HAZARDS, TIERS, PAGE_DOC, PAGE_TAKEN, TEMPLATES, TORN_MULT, tapeCuts } from "@/game/data";
 import { actionsLeft, type DocView, type ToolLevels } from "@/game/engine";
 import { formatWon } from "@/game/format";
 import { getDocCanvas } from "@/game/render/docgen";
@@ -99,10 +99,12 @@ function chipText(h: Hazard, tools: ToolLevels): string | null {
 interface Props {
   doc: DocView;
   tools: ToolLevels;
+  /** 지금 본체 티어 (그냥 갈 수 있는 방해 요소 안내용) */
+  tier: number;
   onTreat: (index: number, page?: number) => void;
 }
 
-export default function Workbench({ doc, tools, onTreat }: Props) {
+export default function Workbench({ doc, tools, tier, onTreat }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const box = usePaperHeight();
   const t = TEMPLATES[doc.template];
@@ -112,6 +114,33 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
   const paperH = Math.round(t.height * scale);
   const hazKey = doc.hazards.map((h) => h.left).join(",") + (doc.torn ? "t" : "");
   const swipe = useRef<{ y: number; id: number } | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  /** 지난 렌더 때 포커스가 작업대 안에 있었는지 (키보드·스크린리더 사용자) */
+  const hadFocus = useRef(false);
+
+  // 처리한 방해 요소의 버튼이 사라지면 포커스가 페이지 맨 위(body)로 튄다 → 다음 할 일로 옮긴다.
+  // 포커스 이벤트에 기대지 않고 매 렌더 뒤 위치를 기록해 둔다
+  useEffect(() => {
+    const sec = sectionRef.current;
+    if (!sec) return;
+    if (hadFocus.current && document.activeElement === document.body) {
+      const next = sec.querySelector<HTMLElement>(".hazard-hit, .album__page") ?? sec.querySelector<HTMLElement>("h2");
+      next?.focus({ preventScroll: true });
+    }
+    hadFocus.current = sec.contains(document.activeElement);
+  });
+
+  // 다 처리해서 작업대가 닫히면 투입 버튼으로
+  useEffect(
+    () => () => {
+      if (!hadFocus.current) return;
+      // 작업대가 DOM에서 빠진 뒤에 옮긴다
+      setTimeout(() => {
+        if (document.activeElement === document.body) document.querySelector<HTMLElement>(".feed-btn")?.focus({ preventScroll: true });
+      }, 0);
+    },
+    [],
+  );
 
   const pending = doc.hazards.map((h, i) => ({ h, i })).filter(({ h }) => h.left > 0);
   const album = pending.find(({ h }) => h.kind === "album");
@@ -120,7 +149,13 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
     ({ h }) => h.kind === "sleeve" || (h.kind === "envelope" && h.left <= ENVELOPE_OPENED),
   );
   const wrap = pending.find(({ h }) => CONTAINER_KINDS.includes(h.kind));
-  const firstTip = pending[0] ? HAZARDS[pending[0].h.kind].tip : null;
+  // 지금 본체가 그냥 갈아버리는 것이면 그렇게 안내 (빼면 보너스만)
+  const firstKind = pending[0]?.h.kind;
+  const firstTip = firstKind
+    ? TIERS[tier].handles[firstKind] === 0
+      ? `${HAZARDS[firstKind].name}: 지금 파쇄기는 그냥 갈아요. 직접 빼면 수익 보너스만 받아요.`
+      : HAZARDS[firstKind].tip
+    : null;
 
   // 서류 + 방해 요소를 작업대 크기로 그림 (방해 요소가 바뀔 때마다 다시)
   useEffect(() => {
@@ -160,9 +195,13 @@ export default function Workbench({ doc, tools, onTreat }: Props) {
   };
 
   return (
-    <section className="workbench" aria-labelledby="workbench-title">
+    <section
+      ref={sectionRef}
+      className="workbench"
+      aria-labelledby="workbench-title"
+    >
       <div className="workbench__head">
-        <h2 id="workbench-title" className="section-title">
+        <h2 id="workbench-title" className="section-title" tabIndex={-1}>
           작업대
         </h2>
         <span className="workbench__doc">

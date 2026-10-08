@@ -51,9 +51,9 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   memo: { name: "메모", baseValue: 8, width: 148, height: 210, weight: 2, thickness: 0.8 },
   // 사용자가 올린 이미지로 만든 종이: 무작위로는 나오지 않음, 일반 공문과 같은 수익
   image: { name: "내 이미지", baseValue: 12, width: 210, height: 297, weight: 0, thickness: 1 },
-  bizcard: { name: "명함", baseValue: 14, width: 90, height: 50, weight: 1.5, thickness: 2, load: 3, unlockAt: 320 },
-  card: { name: "카드", baseValue: 45, width: 86, height: 54, weight: 1, thickness: 3, slot: true, minTier: 3 },
-  cd: { name: "CD", baseValue: 35, width: 120, height: 120, weight: 1, thickness: 3.5, slot: true, minTier: 3 },
+  bizcard: { name: "명함", baseValue: 14, width: 90, height: 50, weight: 1.5, thickness: 2, load: 3, unlockAt: 750 },
+  card: { name: "카드", baseValue: 45, width: 86, height: 54, weight: 1, thickness: 2.5, slot: true, minTier: 3 },
+  cd: { name: "CD", baseValue: 35, width: 120, height: 120, weight: 1, thickness: 3, slot: true, minTier: 3 },
 };
 
 /** 무작위로 도착하는 양식 */
@@ -108,7 +108,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 1,
     jam: 0.35,
     heavy: false,
-    unlockAt: 15,
+    unlockAt: 20,
     tip: "클립은 탭해서 빼세요. 가정용 파쇄기는 클립을 못 갈아요.",
   },
   staple: {
@@ -117,7 +117,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 2,
     jam: 0.3,
     heavy: false,
-    unlockAt: 30,
+    unlockAt: 50,
     tip: "스테이플은 한 번 탭해 들어 올리고, 한 번 더 탭해 빼요.",
   },
   binder: {
@@ -126,7 +126,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 2,
     jam: 0.6,
     heavy: true,
-    unlockAt: 60,
+    unlockAt: 100,
     tip: "집게는 레버를 열고(탭) 빼세요(탭). 걸리면 손으로 빼야 해요.",
   },
   sleeve: {
@@ -135,7 +135,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 1,
     jam: 0.85,
     heavy: true,
-    unlockAt: 90,
+    unlockAt: 160,
     tip: "투명 파일에 든 서류는 위로 밀어 꺼내세요. 비닐은 거의 확실히 걸려요.",
   },
   postit: {
@@ -144,7 +144,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 1,
     jam: 0.2,
     heavy: false,
-    unlockAt: 120,
+    unlockAt: 240,
     tip: "포스트잇은 탭해서 떼세요. 접착면이 칼날에 들러붙어요.",
   },
   tape: {
@@ -153,7 +153,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 3,
     jam: 0.45,
     heavy: false,
-    unlockAt: 150,
+    unlockAt: 330,
     tip: "테이프는 줄을 따라 끌어서 잘라 떼요. 손으로 하면 서류가 찢어질 수 있어요 — 커터칼이 있으면 깔끔해요.",
   },
   envelope: {
@@ -163,7 +163,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 4,
     jam: 0.5,
     heavy: false,
-    unlockAt: 200,
+    unlockAt: 450,
     tip: "봉투는 윗변을 뜯어 열고 서류를 위로 꺼내요. 레터 오프너가 있으면 한 번에 열려요.",
   },
   album: {
@@ -173,7 +173,7 @@ export const HAZARDS: Record<HazardKind, HazardDef> = {
     taps: 4,
     jam: 0.9,
     heavy: true,
-    unlockAt: 260,
+    unlockAt: 600,
     tip: "앨범 파일은 좌우로 넘기며 서류가 든 페이지만 꺼내세요. 빈 포켓은 건너뛰어요.",
   },
   chip: {
@@ -279,6 +279,8 @@ export interface TierDef {
   heat: number;
   /** 파쇄 시간 배율 */
   time: number;
+  /** 식는 속도 배율 (큰 기계일수록 냉각이 좋다) */
+  cool: number;
   /** 처리 안 한 방해 요소의 잼 확률 배율 (기계가 갈아버릴 수 있는 것) */
   handles: Partial<Record<HazardKind, number>>;
   /** 카드/CD 전용 슬롯 */
@@ -288,7 +290,7 @@ export interface TierDef {
 }
 
 export const TIERS: TierDef[] = [
-  { name: "가정용 스트립", grade: "P-1", cost: 0, capacity: 1, mult: 1, heat: 1, time: 1, handles: {}, slot: false, perks: "클립·스테이플을 못 갈아요" },
+  { name: "가정용 스트립", grade: "P-1", cost: 0, capacity: 1, mult: 1, heat: 1, time: 1, cool: 1, handles: {}, slot: false, perks: "클립·스테이플을 못 갈아요" },
   {
     name: "소형 크로스컷",
     grade: "P-3",
@@ -297,6 +299,7 @@ export const TIERS: TierDef[] = [
     mult: 1.6,
     heat: 1.15,
     time: 1.1,
+    cool: 1.15,
     handles: { clip: 0, staple: 0.5 },
     slot: false,
     perks: "클립 OK, 스테이플은 반쯤",
@@ -309,6 +312,7 @@ export const TIERS: TierDef[] = [
     mult: 2.4,
     heat: 1.3,
     time: 1.15,
+    cool: 1.35,
     handles: { clip: 0, staple: 0, binder: 0.5 },
     slot: false,
     perks: "클립·스테이플 OK, 명함도 거뜬",
@@ -321,6 +325,7 @@ export const TIERS: TierDef[] = [
     mult: 3.6,
     heat: 1.6,
     time: 1.3,
+    cool: 1.75,
     handles: { clip: 0, staple: 0, binder: 0.5 },
     slot: true,
     perks: "카드·CD 전용 슬롯, 열이 많이 나요",
@@ -372,6 +377,8 @@ export const HEAT = {
   shreddingCool: 0.4,
   /** 부채질 한 번에 식는 양 */
   fanTap: 1,
+  /** 묶음 열은 두께 합의 이 거듭제곱 (여러 장을 한 번에 넣는 게 한 장씩보다 효율적) */
+  batchExp: 0.85,
   /** 조기 재가동 후 열 발생 배율 (30% 아래로 식을 때까지) */
   earlyPenalty: 1.3,
 };
@@ -407,7 +414,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "파쇄 속도",
     desc: "한 장이 슬롯을 지나가는 시간",
     baseCost: 30,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `${shredTime(lv).toFixed(2)}초/장`,
   },
@@ -417,7 +424,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "재사용 쿨타임",
     desc: "투입 사이 대기 시간",
     baseCost: 45,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `${cooldownTime(lv).toFixed(2)}초`,
   },
@@ -437,7 +444,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "모터 출력",
     desc: "같은 일을 해도 열이 덜 남 (연속 가동 시간↑)",
     baseCost: 60,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `열 ×${heatMult(lv).toFixed(2)}`,
   },
@@ -447,7 +454,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "냉각 팬",
     desc: "식는 속도, 과열 정지 시간 단축",
     baseCost: 50,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `${coolRate(lv).toFixed(1)}%/초`,
   },
@@ -467,7 +474,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "인박스 선반",
     desc: "서류 도착 간격과 대기 칸",
     baseCost: 35,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `${arrivalInterval(lv).toFixed(1)}초 · ${traySlots(lv)}칸`,
   },
@@ -477,7 +484,7 @@ export const UPGRADES: UpgradeDef[] = [
     name: "대형 봉투",
     desc: "통 용량 — 비우는 빈도↓",
     baseCost: 70,
-    growth: 1.15,
+    growth: 1.2,
     maxLevel: 10,
     effect: (lv) => `${binCapacity(lv)}장 분량`,
   },
@@ -629,7 +636,7 @@ export const PRESTIGE = {
   /** 이 티어(0부터) 이상 본체가 있어야 함 */
   minTier: 3,
   /** 이번 지점에서 번 돈이 이만큼 있어야 함 */
-  minEarned: 200000,
+  minEarned: 400000,
   /** 지점 하나당 영구 수익 배율 */
   perBranch: 0.5,
 };
